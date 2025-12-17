@@ -17,22 +17,29 @@ pub struct SignedFrame {
 
 #[derive(Debug, Error)]
 pub enum WireError {
+    #[error("wire IO is not implemented")]
+    IoNotImplemented,
     #[error("frame validation is not implemented")]
     ValidationNotImplemented,
-    #[error("io placeholder error: {0}")]
-    IoPlaceholder(String),
+    #[error("frame signing is not implemented")]
+    SigningNotImplemented,
 }
 
 pub trait FrameIo {
-    fn send(&mut self, frame: SignedFrame) -> Result<(), WireError>;
-    fn receive(&mut self) -> Result<Option<SignedFrame>, WireError>;
+    fn send(&mut self, _frame: SignedFrame) -> Result<(), WireError> {
+        Err(WireError::IoNotImplemented)
+    }
+
+    fn receive(&mut self) -> Result<Option<SignedFrame>, WireError> {
+        Err(WireError::IoNotImplemented)
+    }
 
     fn verify(&self, _frame: &SignedFrame) -> Result<bool, WireError> {
         Err(WireError::ValidationNotImplemented)
     }
 
     fn sign(&self, _frame: Frame) -> Result<SignedFrame, WireError> {
-        Err(WireError::ValidationNotImplemented)
+        Err(WireError::SigningNotImplemented)
     }
 }
 
@@ -40,16 +47,28 @@ pub trait FrameIo {
 mod tests {
     use super::*;
 
+    struct PlaceholderWire;
+
+    impl FrameIo for PlaceholderWire {}
+
     #[test]
-    fn frame_round_trip_placeholder() {
-        let frame = Frame {
-            channel: "rsv".to_string(),
-            payload: vec![1, 2, 3],
-        };
-        let signed = SignedFrame {
-            frame: frame.clone(),
+    fn placeholder_wire_rejects_operations() {
+        let mut wire = PlaceholderWire;
+        let frame = SignedFrame {
+            frame: Frame {
+                channel: "engine".to_string(),
+                payload: vec![0],
+            },
             signature: None,
         };
-        assert_eq!(signed.frame, frame);
+
+        assert!(matches!(
+            wire.send(frame.clone()),
+            Err(WireError::IoNotImplemented)
+        ));
+        assert!(matches!(
+            wire.verify(&frame),
+            Err(WireError::ValidationNotImplemented)
+        ));
     }
 }

@@ -30,66 +30,37 @@ pub struct ProfileResolution {
 
 #[derive(Debug, Error)]
 pub enum ProfileError {
-    #[error("profile {0} is not active")]
-    InactiveProfile(String),
-    #[error("overlay {0} is not supported")]
-    UnsupportedOverlay(String),
+    #[error("profile composition is not implemented")]
+    NotImplemented,
 }
 
 pub trait ProfileComposer {
-    fn compose(&self, request: ProfileResolutionRequest)
-        -> Result<ProfileResolution, ProfileError>;
+    fn compose(
+        &self,
+        _request: ProfileResolutionRequest,
+    ) -> Result<ProfileResolution, ProfileError> {
+        Err(ProfileError::NotImplemented)
+    }
 }
 
 #[derive(Debug, Default)]
-pub struct StaticProfileComposer;
+pub struct PlaceholderComposer;
 
-impl ProfileComposer for StaticProfileComposer {
-    fn compose(
-        &self,
-        request: ProfileResolutionRequest,
-    ) -> Result<ProfileResolution, ProfileError> {
-        if request.profile.is_empty() {
-            return Err(ProfileError::InactiveProfile("<empty>".to_string()));
-        }
-        Ok(ProfileResolution {
-            active_profile: request.profile,
-            active_overlays: request.overlays,
-        })
-    }
-}
+impl ProfileComposer for PlaceholderComposer {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn static_composer_passes_through_values() {
-        let composer = StaticProfileComposer;
+    fn composer_is_a_placeholder() {
+        let composer = PlaceholderComposer;
         let request = ProfileResolutionRequest {
             profile: "baseline".to_string(),
             overlays: vec!["overlay".to_string()],
         };
 
-        let resolution = composer.compose(request).expect("resolution should pass");
-        assert_eq!(resolution.active_profile, "baseline");
-        assert_eq!(resolution.active_overlays, vec!["overlay".to_string()]);
-    }
-
-    #[test]
-    fn static_composer_rejects_empty_profile() {
-        let composer = StaticProfileComposer;
-        let request = ProfileResolutionRequest {
-            profile: String::new(),
-            overlays: Vec::new(),
-        };
-
-        let err = composer
-            .compose(request)
-            .expect_err("empty profiles are invalid");
-        match err {
-            ProfileError::InactiveProfile(name) => assert_eq!(name, "<empty>"),
-            other => panic!("unexpected error: {other:?}"),
-        }
+        let result = composer.compose(request);
+        assert!(matches!(result, Err(ProfileError::NotImplemented)));
     }
 }

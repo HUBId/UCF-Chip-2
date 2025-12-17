@@ -17,68 +17,37 @@ pub struct PvgsSnapshot {
 
 #[derive(Debug, Error)]
 pub enum PvgsError {
-    #[error("PVGS endpoints not configured")]
-    MissingConfig,
     #[error("PVGS fetch is not implemented")]
     NotImplemented,
 }
 
+pub trait PvgsProvider {
+    fn configure(&mut self, _config: PvgsClientConfig) -> Result<(), PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn fetch_cbv(&self) -> Result<PvgsSnapshot, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn fetch_hbv(&self) -> Result<PvgsSnapshot, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+}
+
 #[derive(Debug, Default)]
-pub struct PvgsClient {
-    config: Option<PvgsClientConfig>,
-}
+pub struct PlaceholderPvgsClient;
 
-impl PvgsClient {
-    pub fn new(config: PvgsClientConfig) -> Self {
-        Self {
-            config: Some(config),
-        }
-    }
-
-    pub fn configure(&mut self, config: PvgsClientConfig) {
-        self.config = Some(config);
-    }
-
-    pub fn fetch_cbv(&self) -> Result<PvgsSnapshot, PvgsError> {
-        self.check_config()?;
-        Err(PvgsError::NotImplemented)
-    }
-
-    pub fn fetch_hbv(&self) -> Result<PvgsSnapshot, PvgsError> {
-        self.check_config()?;
-        Err(PvgsError::NotImplemented)
-    }
-
-    fn check_config(&self) -> Result<(), PvgsError> {
-        if self.config.is_none() {
-            return Err(PvgsError::MissingConfig);
-        }
-        Ok(())
-    }
-}
+impl PvgsProvider for PlaceholderPvgsClient {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn client_requires_configuration() {
-        let client = PvgsClient::default();
-        let err = client
-            .fetch_cbv()
-            .expect_err("missing config should be rejected");
-        assert!(matches!(err, PvgsError::MissingConfig));
-    }
-
-    #[test]
-    fn configured_client_is_placeholder_only() {
-        let mut client = PvgsClient::default();
-        client.configure(PvgsClientConfig {
-            cbv_endpoint: "http://cbv".to_string(),
-            hbv_endpoint: "http://hbv".to_string(),
-        });
-
-        let err = client.fetch_hbv().expect_err("fetch is placeholder");
-        assert!(matches!(err, PvgsError::NotImplemented));
+    fn pvgs_placeholder_rejects_fetches() {
+        let client = PlaceholderPvgsClient;
+        assert!(matches!(client.fetch_cbv(), Err(PvgsError::NotImplemented)));
+        assert!(matches!(client.fetch_hbv(), Err(PvgsError::NotImplemented)));
     }
 }

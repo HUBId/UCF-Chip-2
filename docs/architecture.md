@@ -3,13 +3,13 @@
 ## Workspace Overview
 The workspace is organized as a Rust workspace rooted at the repository root. All crates forbid unsafe code and expose placeholder APIs only.
 
-- **wire**: Frame IO primitives with placeholders for signing and verification. Intended to wrap transport and cryptographic concerns for regulator messaging.
-- **rsv**: Regulator State Vector types and storage abstraction. Provides a simple `RegulatorState` structure and `StateStore` trait for persistence backends.
-- **profiles**: Profile and overlay composition primitives. Offers serializable definitions and a `ProfileComposer` trait with a simple `StaticProfileComposer` placeholder.
-- **engine**: Update engine surface. Defines the `UpdateEngine` trait, input/output structures, and helper utilities for staging profile resolutions.
-- **hpa**: Placeholder for the DBM-HPA layer, with a no-op client and configuration skeleton for future memristor-backed implementations.
-- **pvgs_client**: Client placeholder for CBV/HBV retrieval. Includes configuration and snapshot scaffolding with minimal validation.
-- **app**: Binary crate that wires together config paths and placeholder components. It validates config path presence, triggers a dummy profile resolution, and announces successful boot.
+- **wire**: Frame IO primitives with placeholders for signing and verification. All trait methods default to `NotImplemented` errors to keep logic stubbed out.
+- **rsv**: Regulator State Vector types and storage abstraction. Provides a serializable `RegulatorState` structure and `StateStore` trait for future persistence backends.
+- **profiles**: Profile and overlay composition primitives. Offers serializable definitions and a `ProfileComposer` trait with a placeholder implementation that always reports `NotImplemented`.
+- **engine**: Update engine surface. Defines the `UpdateEngine` trait, input/output structures, and a default `NotImplemented` application path for future regulation logic.
+- **hpa**: Placeholder for the DBM-HPA layer with configuration and snapshot stubs, plus a `PlaceholderHpa` client that returns `NotImplemented`.
+- **pvgs_client**: Client placeholder for CBV/HBV retrieval. Includes configuration and snapshot scaffolding alongside a `PlaceholderPvgsClient` that has no real network behavior.
+- **app**: Binary crate that validates configuration paths, exercises the placeholder components, and prints a `boot ok` message without performing real regulation.
 
 ## Configuration Directory
 The `config/` directory contains placeholder YAML files for profiles, overlays, update tables, windowing, class thresholds, and HPA settings. They are referenced by the `app` crate but not parsed yet.

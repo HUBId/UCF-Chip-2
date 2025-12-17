@@ -17,26 +17,13 @@ pub struct HpaSnapshot {
 
 #[derive(Debug, Error)]
 pub enum HpaError {
-    #[error("HPA configuration missing: {0}")]
-    MissingConfig(String),
     #[error("HPA interaction is not implemented")]
     NotImplemented,
 }
 
 pub trait HpaClient {
-    fn configure(&mut self, config: HpaConfig) -> Result<(), HpaError>;
-    fn measure(&mut self) -> Result<HpaSnapshot, HpaError>;
-}
-
-#[derive(Debug, Default)]
-pub struct NoopHpaClient {
-    pub last_config: Option<HpaConfig>,
-}
-
-impl HpaClient for NoopHpaClient {
-    fn configure(&mut self, config: HpaConfig) -> Result<(), HpaError> {
-        self.last_config = Some(config);
-        Ok(())
+    fn configure(&mut self, _config: HpaConfig) -> Result<(), HpaError> {
+        Err(HpaError::NotImplemented)
     }
 
     fn measure(&mut self) -> Result<HpaSnapshot, HpaError> {
@@ -44,27 +31,18 @@ impl HpaClient for NoopHpaClient {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct PlaceholderHpa;
+
+impl HpaClient for PlaceholderHpa {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn noop_client_stores_config() {
-        let mut client = NoopHpaClient::default();
-        let config = HpaConfig {
-            endpoint: "memristor:0".to_string(),
-            calibration_table: Some("default".to_string()),
-        };
-
-        client
-            .configure(config.clone())
-            .expect("config should be accepted");
-        assert_eq!(client.last_config, Some(config));
-    }
-
-    #[test]
-    fn noop_client_measure_not_implemented() {
-        let mut client = NoopHpaClient::default();
+    fn hpa_is_a_placeholder() {
+        let mut client = PlaceholderHpa;
         let result = client.measure();
         assert!(matches!(result, Err(HpaError::NotImplemented)));
     }

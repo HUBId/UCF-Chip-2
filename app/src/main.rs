@@ -1,12 +1,12 @@
 #![forbid(unsafe_code)]
 
-use engine::{stage_resolution, EngineError};
-use hpa::{HpaClient, HpaConfig, HpaError, NoopHpaClient};
-use profiles::StaticProfileComposer;
-use pvgs_client::{PvgsClient, PvgsClientConfig};
-use rsv::{HealthFlag, RegulatorState, StateError, StateStore};
+use engine::EngineInputs;
+use hpa::{HpaClient, HpaConfig, PlaceholderHpa};
+use profiles::{PlaceholderComposer, ProfileComposer, ProfileResolutionRequest};
+use pvgs_client::{PlaceholderPvgsClient, PvgsClientConfig, PvgsProvider};
+use rsv::{RegulatorState, StateError, StateStore};
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use thiserror::Error;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 struct ConfigPaths {
@@ -31,31 +31,15 @@ impl Default for ConfigPaths {
     }
 }
 
-#[derive(Debug)]
+#[allow(dead_code)]
+#[derive(Debug, Error)]
 enum AppError {
+    #[error("configuration path missing for {0}")]
     MissingPath(&'static str),
-    State(StateError),
-    Engine(EngineError),
-    Hpa(HpaError),
-    ConfigSerde(serde_yaml::Error),
-}
-
-impl From<StateError> for AppError {
-    fn from(error: StateError) -> Self {
-        AppError::State(error)
-    }
-}
-
-impl From<EngineError> for AppError {
-    fn from(error: EngineError) -> Self {
-        AppError::Engine(error)
-    }
-}
-
-impl From<HpaError> for AppError {
-    fn from(error: HpaError) -> Self {
-        AppError::Hpa(error)
-    }
+    #[error("configuration serialization failed: {0}")]
+    ConfigSerde(#[from] serde_yaml::Error),
+    #[error("state store placeholder error: {0}")]
+    State(#[from] StateError),
 }
 
 impl From<serde_yaml::Error> for AppError {
@@ -64,31 +48,11 @@ impl From<serde_yaml::Error> for AppError {
     }
 }
 
-impl fmt::Display for AppError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AppError::MissingPath(path) => write!(f, "configuration path missing for {path}"),
-            AppError::State(err) => {
-                let _ = err;
-                write!(f, "state error")
-            }
-            AppError::Engine(err) => {
-                let _ = err;
-                write!(f, "engine error")
-            }
-            AppError::Hpa(err) => {
-                let _ = err;
-                write!(f, "HPA error")
-            }
-            AppError::ConfigSerde(err) => {
-                let _ = err;
-                write!(f, "config serialization failed")
-            }
-        }
+impl From<StateError> for AppError {
+    fn from(error: StateError) -> Self {
+        AppError::State(error)
     }
 }
-
-impl std::error::Error for AppError {}
 
 struct MemoryStore {
     state: RegulatorState,
@@ -133,36 +97,36 @@ fn validate_paths(paths: &ConfigPaths) -> Result<(), AppError> {
     Ok(())
 }
 
+fn announce_placeholders() {
+    let composer = PlaceholderComposer;
+    let _ = composer.compose(ProfileResolutionRequest {
+        profile: "baseline".to_string(),
+        overlays: vec![],
+    });
+
+    let _wire_inputs = EngineInputs {
+        tick: 0,
+        inbound: Vec::new(),
+    };
+
+    let mut hpa = PlaceholderHpa;
+    let _ = hpa.configure(HpaConfig::default());
+
+    let mut pvgs = PlaceholderPvgsClient;
+    let _ = pvgs.configure(PvgsClientConfig::default());
+}
+
 fn main() -> Result<(), AppError> {
     let paths = ConfigPaths::default();
     validate_paths(&paths)?;
 
     let _ = serde_yaml::to_string(&paths)?;
 
-    let state_store = MemoryStore::new(RegulatorState {
-        profile: "baseline".to_string(),
-        active_overlays: vec!["default".to_string()],
-        window_index: 0,
-        health: HealthFlag::Nominal,
-    });
+    let state_store = MemoryStore::new(RegulatorState::default());
+    let _ = state_store.load()?;
 
-    let mut hpa_client = NoopHpaClient::default();
-    hpa_client.configure(HpaConfig::default())?;
+    announce_placeholders();
 
-    let mut pvgs_client = PvgsClient::default();
-    pvgs_client.configure(PvgsClientConfig {
-        cbv_endpoint: "cbv".to_string(),
-        hbv_endpoint: "hbv".to_string(),
-    });
-
-    let composer = StaticProfileComposer;
-    let current_state = state_store.load()?;
-    let resolution = stage_resolution(&composer, &current_state)?;
-
-    // future: wire up RSV, PVGS, and HPA components using the placeholders above
-    let _ = pvgs_client;
-    let _ = hpa_client;
-    println!("boot ok: loaded configs from {:?}", paths);
-    println!("active resolution: {resolution:?}");
+    println!("boot ok: loaded config paths {:?}", paths);
     Ok(())
 }
