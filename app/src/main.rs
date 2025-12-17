@@ -22,6 +22,7 @@ fn main() {
         integrity_state: IntegrityStateClass::Ok as i32,
         top_reason_codes: vec![ReasonCode::Unknown as i32],
         signal_frame_digest: None,
+        receipt_stats: None,
     };
 
     ingestor

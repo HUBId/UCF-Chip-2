@@ -38,11 +38,21 @@ pub mod v1 {
         Unknown = 0,
         ReIntegrityFail = 1,
         ReIntegrityDegraded = 2,
+        RcGeExecDispatchBlocked = 3,
+        RcThIntegrityCompromise = 4,
         ThExfilHighConfidence = 10,
         ThPolicyProbing = 11,
         RcCdDlpSecretPattern = 20,
         RcCdDlpObfuscation = 21,
         RcCdDlpStegano = 22,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct ReceiptStats {
+        #[prost(uint32, tag = "1")]
+        pub receipt_missing_count: u32,
+        #[prost(uint32, tag = "2")]
+        pub receipt_invalid_count: u32,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
@@ -77,6 +87,8 @@ pub mod v1 {
         pub top_reason_codes: ::prost::alloc::vec::Vec<i32>,
         #[prost(bytes, optional, tag = "8")]
         pub signal_frame_digest: Option<::prost::alloc::vec::Vec<u8>>,
+        #[prost(message, optional, tag = "9")]
+        pub receipt_stats: Option<ReceiptStats>,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]

@@ -4,7 +4,7 @@ use blake3::Hasher;
 use profiles::{decide, ControlDecision, ProfileState};
 use prost::Message;
 use rsv::RsvState;
-use ucf::v1::{ActiveProfile, ControlFrame, Overlays, ReasonCode, ToolClassMask};
+use ucf::v1::{ActiveProfile, ControlFrame, Overlays, ToolClassMask};
 
 const CONTROL_FRAME_DOMAIN: &str = "UCF:HASH:CONTROL_FRAME";
 
@@ -72,11 +72,18 @@ impl RegulationEngine {
             },
         };
 
+        let mut profile_reason_codes: Vec<i32> = decision
+            .profile_reason_codes
+            .iter()
+            .map(|code| *code as i32)
+            .collect();
+        profile_reason_codes.sort();
+
         let mut control_frame = ControlFrame {
             active_profile: Some(profile),
             overlays: Some(overlays),
             toolclass_mask: Some(toolclass_mask),
-            profile_reason_codes: profile_reasons(&decision),
+            profile_reason_codes,
             control_frame_digest: None,
         };
 
@@ -102,29 +109,13 @@ fn profile_string(profile: ProfileState) -> String {
     }
 }
 
-fn profile_reasons(decision: &ControlDecision) -> Vec<i32> {
-    match decision.profile {
-        ProfileState::M3Forensic => {
-            vec![ReasonCode::ReIntegrityFail as i32]
-        }
-        ProfileState::M2Quarantine => {
-            vec![ReasonCode::ThExfilHighConfidence as i32]
-        }
-        ProfileState::M1Restricted => {
-            if decision.missing_frame_override {
-                vec![ReasonCode::ReIntegrityDegraded as i32]
-            } else {
-                vec![ReasonCode::ThPolicyProbing as i32]
-            }
-        }
-        ProfileState::M0Research => Vec::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ucf::v1::{ExecStats, IntegrityStateClass, PolicyStats, SignalFrame, WindowKind};
+    use ucf::v1::{
+        ExecStats, IntegrityStateClass, PolicyStats, ReasonCode, ReceiptStats, SignalFrame,
+        WindowKind,
+    };
 
     fn base_frame() -> SignalFrame {
         SignalFrame {
@@ -139,6 +130,7 @@ mod tests {
             integrity_state: IntegrityStateClass::Ok as i32,
             top_reason_codes: Vec::new(),
             signal_frame_digest: None,
+            receipt_stats: None,
         }
     }
 
@@ -155,6 +147,16 @@ mod tests {
     }
 
     #[test]
+    fn frame_without_receipt_stats_stays_in_m0() {
+        let mut engine = RegulationEngine::default();
+        let frame = base_frame();
+        let control = engine.on_signal_frame(frame, 1);
+
+        assert_eq!(control.active_profile.unwrap().profile, "M0_RESEARCH");
+        assert_eq!(control.profile_reason_codes, Vec::<i32>::new());
+    }
+
+    #[test]
     fn policy_pressure_triggers_m1() {
         let mut engine = RegulationEngine::default();
         let mut frame = base_frame();
@@ -168,6 +170,42 @@ mod tests {
         assert_eq!(profile, "M1_RESTRICTED");
         let overlays = control.overlays.unwrap();
         assert!(overlays.simulate_first && overlays.export_lock && overlays.novelty_lock);
+    }
+
+    #[test]
+    fn receipt_missing_triggers_restriction() {
+        let mut engine = RegulationEngine::default();
+        let mut frame = base_frame();
+        frame.receipt_stats = Some(ReceiptStats {
+            receipt_missing_count: 1,
+            receipt_invalid_count: 0,
+        });
+
+        let control = engine.on_signal_frame(frame, 1);
+        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
+        let overlays = control.overlays.unwrap();
+        assert!(overlays.simulate_first && overlays.export_lock && overlays.novelty_lock);
+        assert_eq!(
+            control.profile_reason_codes,
+            vec![ReasonCode::RcGeExecDispatchBlocked as i32]
+        );
+    }
+
+    #[test]
+    fn receipt_invalid_escalates_to_quarantine() {
+        let mut engine = RegulationEngine::default();
+        let mut frame = base_frame();
+        frame.receipt_stats = Some(ReceiptStats {
+            receipt_missing_count: 0,
+            receipt_invalid_count: 2,
+        });
+
+        let control = engine.on_signal_frame(frame, 1);
+        assert_eq!(control.active_profile.unwrap().profile, "M2_QUARANTINE");
+        assert_eq!(
+            control.profile_reason_codes,
+            vec![ReasonCode::RcGeExecDispatchBlocked as i32]
+        );
     }
 
     #[test]
@@ -224,5 +262,33 @@ mod tests {
                 mask.read, mask.write, mask.execute, mask.transform, mask.export
             );
         }
+    }
+
+    #[test]
+    fn reason_codes_are_sorted_before_digest() {
+        let engine = RegulationEngine::default();
+        let decision = ControlDecision {
+            profile: ProfileState::M1Restricted,
+            overlays: profiles::OverlaySet {
+                simulate_first: true,
+                export_lock: true,
+                novelty_lock: true,
+            },
+            deescalation_lock: true,
+            missing_frame_override: false,
+            profile_reason_codes: vec![
+                ReasonCode::RcThIntegrityCompromise,
+                ReasonCode::RcGeExecDispatchBlocked,
+            ],
+        };
+
+        let control_frame = engine.render_control_frame(decision);
+        assert_eq!(
+            control_frame.profile_reason_codes,
+            vec![
+                ReasonCode::RcGeExecDispatchBlocked as i32,
+                ReasonCode::RcThIntegrityCompromise as i32,
+            ]
+        );
     }
 }
