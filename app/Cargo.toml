@@ -5,11 +5,6 @@ edition = "2021"
 
 [dependencies]
 engine = { path = "../engine" }
-hpa = { path = "../hpa" }
-pvgs_client = { path = "../pvgs_client" }
-profiles = { path = "../profiles" }
-rsv = { path = "../rsv" }
 wire = { path = "../wire" }
-serde = { workspace = true }
-serde_yaml = { workspace = true }
-thiserror = { workspace = true }
+hex = "0.4"
+ucf = { package = "ucf-protocol", path = "../ucf-protocol" }

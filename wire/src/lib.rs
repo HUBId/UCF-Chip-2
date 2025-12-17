@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use ucf::v1::WindowKind;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Frame {
@@ -23,6 +24,49 @@ pub enum WireError {
     ValidationNotImplemented,
     #[error("frame signing is not implemented")]
     SigningNotImplemented,
+    #[error("invalid signal frame: {0}")]
+    InvalidSignalFrame(String),
+}
+
+#[derive(Debug, Default)]
+pub struct FrameIngestor;
+
+impl FrameIngestor {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub fn ingest_signal_frame(&mut self, frame: ucf::v1::SignalFrame) -> Result<(), WireError> {
+        let window_kind = WindowKind::try_from(frame.window_kind)
+            .map_err(|_| WireError::InvalidSignalFrame("window_kind missing".to_string()))?;
+
+        match window_kind {
+            WindowKind::Short | WindowKind::Medium => {}
+            _ => {
+                return Err(WireError::InvalidSignalFrame(
+                    "unsupported window kind".to_string(),
+                ))
+            }
+        }
+
+        if frame.window_index.is_none() {
+            return Err(WireError::InvalidSignalFrame(
+                "missing window index".to_string(),
+            ));
+        }
+
+        if frame.timestamp_ms.is_none() {
+            return Err(WireError::InvalidSignalFrame(
+                "missing timestamp_ms".to_string(),
+            ));
+        }
+
+        if frame.signal_frame_digest.is_some() {
+            log::info!("TODO: verify signal_frame_digest");
+        }
+
+        Ok(())
+    }
 }
 
 pub trait FrameIo {
@@ -46,6 +90,7 @@ pub trait FrameIo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ucf::v1::{IntegrityStateClass, SignalFrame};
 
     struct PlaceholderWire;
 
@@ -70,5 +115,32 @@ mod tests {
             wire.verify(&frame),
             Err(WireError::ValidationNotImplemented)
         ));
+    }
+
+    #[test]
+    fn ingestor_accepts_short_frames() {
+        let mut ingestor = FrameIngestor::new();
+        let frame = SignalFrame {
+            window_kind: WindowKind::Short as i32,
+            window_index: Some(1),
+            timestamp_ms: Some(42),
+            integrity_state: IntegrityStateClass::Ok as i32,
+            ..SignalFrame::default()
+        };
+
+        assert!(ingestor.ingest_signal_frame(frame).is_ok());
+    }
+
+    #[test]
+    fn ingestor_rejects_invalid_frames() {
+        let mut ingestor = FrameIngestor::new();
+        let frame = SignalFrame {
+            window_kind: WindowKind::Long as i32,
+            integrity_state: IntegrityStateClass::Ok as i32,
+            ..SignalFrame::default()
+        };
+
+        let result = ingestor.ingest_signal_frame(frame);
+        assert!(matches!(result, Err(WireError::InvalidSignalFrame(_))));
     }
 }

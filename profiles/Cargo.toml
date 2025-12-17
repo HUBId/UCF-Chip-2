@@ -8,3 +8,4 @@ rsv = { path = "../rsv" }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
+ucf = { package = "ucf-protocol", path = "../ucf-protocol" }

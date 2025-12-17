@@ -1,0 +1,12 @@
+[package]
+name = "ucf-protocol"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "ucf"
+path = "src/lib.rs"
+
+[dependencies]
+prost = "0.12"
+serde = { workspace = true, features = ["derive"] }
