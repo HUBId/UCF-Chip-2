@@ -2,6 +2,7 @@
 
 use rsv::RsvState;
 use serde::{Deserialize, Serialize};
+use ucf::v1::ReasonCode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProfileState {
@@ -24,6 +25,7 @@ pub struct ControlDecision {
     pub overlays: OverlaySet,
     pub deescalation_lock: bool,
     pub missing_frame_override: bool,
+    pub profile_reason_codes: Vec<ReasonCode>,
 }
 
 pub fn decide(rsv: &RsvState, now_ms: u64) -> ControlDecision {
@@ -45,6 +47,7 @@ pub fn decide(rsv: &RsvState, now_ms: u64) -> ControlDecision {
             overlays: overlays_all_true.clone(),
             deescalation_lock: true,
             missing_frame_override: missing,
+            profile_reason_codes: vec![ReasonCode::ReIntegrityFail],
         };
     }
 
@@ -54,6 +57,33 @@ pub fn decide(rsv: &RsvState, now_ms: u64) -> ControlDecision {
             overlays: overlays_all_true.clone(),
             deescalation_lock: true,
             missing_frame_override: missing,
+            profile_reason_codes: vec![ReasonCode::ThExfilHighConfidence],
+        };
+    }
+
+    if rsv.receipt_failures == ucf::v1::LevelClass::High {
+        let profile = if rsv.receipt_invalid_count_window >= 2 {
+            ProfileState::M2Quarantine
+        } else {
+            ProfileState::M1Restricted
+        };
+
+        return ControlDecision {
+            profile,
+            overlays: overlays_all_true.clone(),
+            deescalation_lock: true,
+            missing_frame_override: missing,
+            profile_reason_codes: vec![ReasonCode::RcGeExecDispatchBlocked],
+        };
+    }
+
+    if rsv.receipt_failures == ucf::v1::LevelClass::Med {
+        return ControlDecision {
+            profile: ProfileState::M1Restricted,
+            overlays: overlays_all_true.clone(),
+            deescalation_lock: true,
+            missing_frame_override: missing,
+            profile_reason_codes: vec![ReasonCode::RcGeExecDispatchBlocked],
         };
     }
 
@@ -63,6 +93,7 @@ pub fn decide(rsv: &RsvState, now_ms: u64) -> ControlDecision {
             overlays: overlays_all_true.clone(),
             deescalation_lock: true,
             missing_frame_override: missing,
+            profile_reason_codes: vec![ReasonCode::ThPolicyProbing],
         };
     }
 
@@ -72,6 +103,7 @@ pub fn decide(rsv: &RsvState, now_ms: u64) -> ControlDecision {
             overlays: overlays_all_true,
             deescalation_lock: true,
             missing_frame_override: true,
+            profile_reason_codes: vec![ReasonCode::ReIntegrityDegraded],
         };
     }
 
@@ -80,6 +112,7 @@ pub fn decide(rsv: &RsvState, now_ms: u64) -> ControlDecision {
         overlays: OverlaySet::default(),
         deescalation_lock: false,
         missing_frame_override: missing,
+        profile_reason_codes: Vec::new(),
     }
 }
 
@@ -87,7 +120,7 @@ pub fn decide(rsv: &RsvState, now_ms: u64) -> ControlDecision {
 mod tests {
     use super::*;
     use rsv::RsvState;
-    use ucf::v1::{IntegrityStateClass, LevelClass};
+    use ucf::v1::{IntegrityStateClass, LevelClass, ReasonCode};
 
     #[test]
     fn integrity_fail_forces_forensic() {
@@ -100,6 +133,10 @@ mod tests {
         assert_eq!(decision.profile, ProfileState::M3Forensic);
         assert!(decision.deescalation_lock);
         assert!(decision.overlays.simulate_first);
+        assert_eq!(
+            decision.profile_reason_codes,
+            vec![ReasonCode::ReIntegrityFail]
+        );
     }
 
     #[test]
@@ -112,6 +149,10 @@ mod tests {
         assert_eq!(decision.profile, ProfileState::M1Restricted);
         assert!(decision.overlays.export_lock);
         assert!(decision.deescalation_lock);
+        assert_eq!(
+            decision.profile_reason_codes,
+            vec![ReasonCode::ReIntegrityDegraded]
+        );
     }
 
     #[test]
@@ -122,10 +163,53 @@ mod tests {
         };
         let decision = decide(&rsv, 0);
         assert_eq!(decision.profile, ProfileState::M1Restricted);
+        assert_eq!(
+            decision.profile_reason_codes,
+            vec![ReasonCode::ThPolicyProbing]
+        );
 
         rsv.policy_pressure = LevelClass::Low;
         rsv.threat = LevelClass::High;
         let decision = decide(&rsv, 0);
         assert_eq!(decision.profile, ProfileState::M2Quarantine);
+        assert_eq!(
+            decision.profile_reason_codes,
+            vec![ReasonCode::ThExfilHighConfidence]
+        );
+    }
+
+    #[test]
+    fn receipt_failures_trigger_restriction() {
+        let rsv = RsvState {
+            receipt_failures: LevelClass::High,
+            receipt_missing_count_window: 1,
+            ..Default::default()
+        };
+
+        let decision = decide(&rsv, 0);
+        assert_eq!(decision.profile, ProfileState::M1Restricted);
+        assert!(decision.overlays.simulate_first);
+        assert_eq!(
+            decision.profile_reason_codes,
+            vec![ReasonCode::RcGeExecDispatchBlocked]
+        );
+    }
+
+    #[test]
+    fn receipt_invalid_escalates_to_quarantine() {
+        let rsv = RsvState {
+            receipt_failures: LevelClass::High,
+            receipt_invalid_count_window: 2,
+            ..Default::default()
+        };
+
+        let decision = decide(&rsv, 0);
+        assert_eq!(decision.profile, ProfileState::M2Quarantine);
+        assert!(decision.deescalation_lock);
+        assert!(decision.overlays.export_lock);
+        assert_eq!(
+            decision.profile_reason_codes,
+            vec![ReasonCode::RcGeExecDispatchBlocked]
+        );
     }
 }

@@ -10,6 +10,9 @@ pub struct RsvState {
     pub threat: LevelClass,
     pub arousal: LevelClass,
     pub stability: LevelClass,
+    pub receipt_failures: LevelClass,
+    pub receipt_missing_count_window: u32,
+    pub receipt_invalid_count_window: u32,
     pub last_seen_frame_ts_ms: Option<u64>,
     pub missing_frame_counter: u32,
 }
@@ -22,6 +25,9 @@ impl Default for RsvState {
             threat: LevelClass::Low,
             arousal: LevelClass::Low,
             stability: LevelClass::Low,
+            receipt_failures: LevelClass::Low,
+            receipt_missing_count_window: 0,
+            receipt_invalid_count_window: 0,
             last_seen_frame_ts_ms: None,
             missing_frame_counter: 0,
         }
@@ -97,13 +103,32 @@ impl RsvState {
         } else {
             LevelClass::Low
         };
+
+        if let Some(receipt_stats) = frame.receipt_stats.as_ref() {
+            self.receipt_missing_count_window = receipt_stats.receipt_missing_count;
+            self.receipt_invalid_count_window = receipt_stats.receipt_invalid_count;
+
+            self.receipt_failures = if receipt_stats.receipt_invalid_count >= 1
+                || receipt_stats.receipt_missing_count >= 2
+            {
+                LevelClass::High
+            } else if receipt_stats.receipt_missing_count == 1 {
+                LevelClass::Med
+            } else {
+                LevelClass::Low
+            };
+        } else {
+            self.receipt_missing_count_window = 0;
+            self.receipt_invalid_count_window = 0;
+            self.receipt_failures = LevelClass::Low;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ucf::v1::{ExecStats, PolicyStats, WindowKind};
+    use ucf::v1::{ExecStats, PolicyStats, ReceiptStats, WindowKind};
 
     #[test]
     fn default_state_is_low_and_ok() {
@@ -113,6 +138,9 @@ mod tests {
         assert_eq!(state.threat, LevelClass::Low);
         assert_eq!(state.arousal, LevelClass::Low);
         assert_eq!(state.stability, LevelClass::Low);
+        assert_eq!(state.receipt_failures, LevelClass::Low);
+        assert_eq!(state.receipt_missing_count_window, 0);
+        assert_eq!(state.receipt_invalid_count_window, 0);
         assert_eq!(state.missing_frame_counter, 0);
     }
 
@@ -165,5 +193,52 @@ mod tests {
         state.update_from_signal_frame(&frame);
         assert_eq!(state.integrity, IntegrityStateClass::Fail);
         assert_eq!(state.stability, LevelClass::High);
+    }
+
+    #[test]
+    fn receipt_stats_update_state() {
+        let mut state = RsvState::default();
+        let frame = SignalFrame {
+            window_kind: WindowKind::Short as i32,
+            window_index: Some(1),
+            timestamp_ms: Some(1),
+            receipt_stats: Some(ReceiptStats {
+                receipt_missing_count: 1,
+                receipt_invalid_count: 0,
+            }),
+            ..SignalFrame::default()
+        };
+
+        state.update_from_signal_frame(&frame);
+
+        assert_eq!(state.receipt_missing_count_window, 1);
+        assert_eq!(state.receipt_invalid_count_window, 0);
+        assert_eq!(state.receipt_failures, LevelClass::Med);
+    }
+
+    #[test]
+    fn missing_receipt_stats_reset_state() {
+        let mut state = RsvState::default();
+        let frame = SignalFrame {
+            window_kind: WindowKind::Short as i32,
+            window_index: Some(1),
+            timestamp_ms: Some(1),
+            receipt_stats: Some(ReceiptStats {
+                receipt_missing_count: 3,
+                receipt_invalid_count: 2,
+            }),
+            ..SignalFrame::default()
+        };
+
+        state.update_from_signal_frame(&frame);
+        assert_eq!(state.receipt_failures, LevelClass::High);
+
+        let mut next_frame = frame;
+        next_frame.receipt_stats = None;
+
+        state.update_from_signal_frame(&next_frame);
+        assert_eq!(state.receipt_missing_count_window, 0);
+        assert_eq!(state.receipt_invalid_count_window, 0);
+        assert_eq!(state.receipt_failures, LevelClass::Low);
     }
 }
