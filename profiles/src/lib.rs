@@ -6,7 +6,7 @@ pub mod config;
 use rsv::RsvState;
 use serde::{de, Deserialize, Serialize};
 use thiserror::Error;
-use ucf::v1::{IntegrityStateClass, LevelClass, ReasonCode};
+use ucf::v1::{CharacterBaselineVector, IntegrityStateClass, LevelClass, ReasonCode};
 
 pub use classification::{classify_signal_frame, ClassifiedSignals};
 pub use config::*;
@@ -61,6 +61,8 @@ pub struct OverlaySet {
     pub simulate_first: bool,
     pub export_lock: bool,
     pub novelty_lock: bool,
+    #[serde(default)]
+    pub chain_tightening: bool,
 }
 
 impl OverlaySet {
@@ -69,6 +71,7 @@ impl OverlaySet {
             simulate_first: self.simulate_first || other.simulate_first,
             export_lock: self.export_lock || other.export_lock,
             novelty_lock: self.novelty_lock || other.novelty_lock,
+            chain_tightening: self.chain_tightening || other.chain_tightening,
         }
     }
 
@@ -77,6 +80,7 @@ impl OverlaySet {
             simulate_first: true,
             export_lock: true,
             novelty_lock: true,
+            chain_tightening: true,
         }
     }
 }
@@ -88,6 +92,8 @@ pub struct ControlDecision {
     pub deescalation_lock: bool,
     pub missing_frame_override: bool,
     pub profile_reason_codes: Vec<ReasonCode>,
+    pub approval_mode: String,
+    pub cooldown_class: LevelClass,
 }
 
 #[derive(Debug, Error)]
@@ -148,6 +154,7 @@ pub fn decide(
     }
 
     let profile = profile.ok_or(DecisionError::NoMatchingRule)?;
+    let profile_def = config.profiles.get(profile);
 
     Ok(ControlDecision {
         profile,
@@ -155,6 +162,8 @@ pub fn decide(
         deescalation_lock,
         missing_frame_override: missing_frame,
         profile_reason_codes: reason_codes,
+        approval_mode: profile_def.approval_mode.clone(),
+        cooldown_class: profile_def.deescalation.cooldown_class,
     })
 }
 
@@ -163,13 +172,76 @@ pub fn decide_with_fallback(
     now_ms: u64,
     config: &RegulationConfig,
 ) -> ControlDecision {
-    decide(rsv, now_ms, config).unwrap_or_else(|_| ControlDecision {
-        profile: ProfileState::M1Restricted,
-        overlays: OverlaySet::all_enabled(),
-        deescalation_lock: true,
-        missing_frame_override: true,
-        profile_reason_codes: vec![ReasonCode::ReIntegrityDegraded],
+    decide(rsv, now_ms, config).unwrap_or_else(|_| {
+        let profile = ProfileState::M1Restricted;
+        let profile_def = config.profiles.get(profile);
+
+        ControlDecision {
+            profile,
+            overlays: OverlaySet::all_enabled(),
+            deescalation_lock: true,
+            missing_frame_override: true,
+            profile_reason_codes: vec![ReasonCode::ReIntegrityDegraded],
+            approval_mode: profile_def.approval_mode.clone(),
+            cooldown_class: profile_def.deescalation.cooldown_class,
+        }
     })
+}
+
+pub fn apply_cbv_modifiers(
+    mut base: ControlDecision,
+    cbv: Option<CharacterBaselineVector>,
+) -> ControlDecision {
+    let Some(cbv) = cbv else {
+        return base;
+    };
+
+    let mut cbv_triggered = false;
+
+    if cbv.baseline_approval_strictness_offset >= 1 {
+        cbv_triggered = true;
+        if base.approval_mode.to_ascii_uppercase() != "STRICT" {
+            base.approval_mode = "STRICT".to_string();
+        }
+    }
+
+    if cbv.baseline_novelty_dampening_offset >= 2 {
+        cbv_triggered = true;
+        base.overlays.novelty_lock = true;
+    }
+
+    if cbv.baseline_export_strictness_offset >= 1 {
+        cbv_triggered = true;
+        base.overlays.export_lock = true;
+    }
+
+    if cbv.baseline_chain_conservatism_offset >= 2 {
+        cbv_triggered = true;
+        base.overlays.simulate_first = true;
+        base.overlays.chain_tightening = true;
+    }
+
+    if cbv.baseline_caution_offset >= 2 {
+        cbv_triggered = true;
+        base.deescalation_lock = true;
+    }
+
+    if cbv.baseline_cooldown_multiplier_class >= 2 {
+        cbv_triggered = true;
+        if (base.cooldown_class as i32) < (LevelClass::High as i32) {
+            base.cooldown_class = LevelClass::High;
+        }
+    }
+
+    if cbv_triggered
+        && !base
+            .profile_reason_codes
+            .contains(&ReasonCode::RcGvCbvUpdated)
+    {
+        base.profile_reason_codes.push(ReasonCode::RcGvCbvUpdated);
+    }
+
+    base
 }
 
 pub fn apply_classification(rsv: &mut RsvState, classified: &ClassifiedSignals, timestamp_ms: u64) {
@@ -202,6 +274,29 @@ mod tests {
             .parent()
             .unwrap()
             .join("config")
+    }
+
+    fn base_decision() -> ControlDecision {
+        ControlDecision {
+            profile: ProfileState::M0Research,
+            overlays: OverlaySet::default(),
+            deescalation_lock: false,
+            missing_frame_override: false,
+            profile_reason_codes: Vec::new(),
+            approval_mode: "NORMAL".to_string(),
+            cooldown_class: LevelClass::Low,
+        }
+    }
+
+    fn cbv_template() -> CharacterBaselineVector {
+        CharacterBaselineVector {
+            baseline_caution_offset: 0,
+            baseline_novelty_dampening_offset: 0,
+            baseline_approval_strictness_offset: 0,
+            baseline_export_strictness_offset: 0,
+            baseline_chain_conservatism_offset: 0,
+            baseline_cooldown_multiplier_class: 0,
+        }
     }
 
     #[test]
@@ -296,5 +391,71 @@ mod tests {
         assert_eq!(decision.profile, ProfileState::M1Restricted);
         assert!(decision.overlays.export_lock);
         assert!(decision.overlays.novelty_lock);
+    }
+
+    #[test]
+    fn cbv_strictness_forces_strict_mode() {
+        let mut cbv = cbv_template();
+        cbv.baseline_approval_strictness_offset = 1;
+
+        let decision = apply_cbv_modifiers(base_decision(), Some(cbv));
+
+        assert_eq!(decision.approval_mode, "STRICT");
+        assert!(decision
+            .profile_reason_codes
+            .contains(&ReasonCode::RcGvCbvUpdated));
+    }
+
+    #[test]
+    fn cbv_novelty_dampening_enables_lock() {
+        let mut cbv = cbv_template();
+        cbv.baseline_novelty_dampening_offset = 2;
+
+        let decision = apply_cbv_modifiers(base_decision(), Some(cbv));
+        assert!(decision.overlays.novelty_lock);
+    }
+
+    #[test]
+    fn cbv_export_strictness_enables_lock() {
+        let mut cbv = cbv_template();
+        cbv.baseline_export_strictness_offset = 1;
+
+        let decision = apply_cbv_modifiers(base_decision(), Some(cbv));
+        assert!(decision.overlays.export_lock);
+    }
+
+    #[test]
+    fn cbv_does_not_loosen_overlays() {
+        let mut cbv = cbv_template();
+        cbv.baseline_export_strictness_offset = 0;
+        let mut base = base_decision();
+        base.overlays.export_lock = true;
+
+        let decision = apply_cbv_modifiers(base.clone(), Some(cbv));
+        assert!(decision.overlays.export_lock);
+        assert_eq!(decision.profile_reason_codes, base.profile_reason_codes);
+    }
+
+    #[test]
+    fn cbv_absent_leaves_decision_unchanged() {
+        let base = base_decision();
+        let decision = apply_cbv_modifiers(base.clone(), None);
+
+        assert_eq!(decision, base);
+    }
+
+    #[test]
+    fn cbv_chain_and_caution_tighten_controls() {
+        let mut cbv = cbv_template();
+        cbv.baseline_chain_conservatism_offset = 2;
+        cbv.baseline_caution_offset = 2;
+        cbv.baseline_cooldown_multiplier_class = 2;
+
+        let decision = apply_cbv_modifiers(base_decision(), Some(cbv));
+
+        assert!(decision.overlays.simulate_first);
+        assert!(decision.overlays.chain_tightening);
+        assert!(decision.deescalation_lock);
+        assert_eq!(decision.cooldown_class, LevelClass::High);
     }
 }

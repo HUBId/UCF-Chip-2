@@ -592,6 +592,7 @@ impl RegulationConfig {
                         simulate_first: true,
                         export_lock: true,
                         novelty_lock: true,
+                        chain_tightening: true,
                     },
                 }],
             },

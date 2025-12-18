@@ -10,6 +10,7 @@ local-pvgs = ["chip4"]
 serde = { workspace = true }
 thiserror = { workspace = true }
 chip4 = { path = "../chip4", optional = true }
+ucf = { package = "ucf-protocol", path = "../ucf-protocol" }
 
 [dev-dependencies]
 chip4 = { path = "../chip4" }

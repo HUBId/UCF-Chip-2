@@ -3,6 +3,7 @@
 pub mod pvgs {
     use prost::Message;
     use std::sync::{Arc, Mutex};
+    use ucf::v1::CharacterBaselineVector;
 
     #[derive(Clone, PartialEq, Message)]
     pub struct Digest32 {
@@ -32,6 +33,8 @@ pub mod pvgs {
         pub proof_receipt_ref: Option<Vec<u8>>,
         #[prost(bytes, optional, tag = "4")]
         pub signature: Option<Vec<u8>>,
+        #[prost(message, optional, tag = "5")]
+        pub cbv: Option<CharacterBaselineVector>,
     }
 
     pub trait CbvQuery: Clone + Send + Sync {

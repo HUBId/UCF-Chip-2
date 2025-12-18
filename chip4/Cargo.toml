@@ -5,3 +5,4 @@ edition.workspace = true
 
 [dependencies]
 prost = "0.12"
+ucf = { package = "ucf-protocol", path = "../ucf-protocol" }

@@ -42,9 +42,26 @@ pub mod v1 {
         RcThIntegrityCompromise = 4,
         ThExfilHighConfidence = 10,
         ThPolicyProbing = 11,
+        RcGvCbvUpdated = 12,
         RcCdDlpSecretPattern = 20,
         RcCdDlpObfuscation = 21,
         RcCdDlpStegano = 22,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct CharacterBaselineVector {
+        #[prost(int32, tag = "1")]
+        pub baseline_caution_offset: i32,
+        #[prost(int32, tag = "2")]
+        pub baseline_novelty_dampening_offset: i32,
+        #[prost(int32, tag = "3")]
+        pub baseline_approval_strictness_offset: i32,
+        #[prost(int32, tag = "4")]
+        pub baseline_export_strictness_offset: i32,
+        #[prost(int32, tag = "5")]
+        pub baseline_chain_conservatism_offset: i32,
+        #[prost(int32, tag = "6")]
+        pub baseline_cooldown_multiplier_class: i32,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
@@ -105,6 +122,8 @@ pub mod v1 {
         pub export_lock: bool,
         #[prost(bool, tag = "3")]
         pub novelty_lock: bool,
+        #[prost(bool, tag = "4")]
+        pub chain_tightening: bool,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
@@ -139,5 +158,9 @@ pub mod v1 {
         pub policy_ecology_digest: Option<::prost::alloc::vec::Vec<u8>>,
         #[prost(string, optional, tag = "8")]
         pub approval_mode: Option<::prost::alloc::string::String>,
+        #[prost(bool, optional, tag = "9")]
+        pub deescalation_lock: Option<bool>,
+        #[prost(enumeration = "LevelClass", optional, tag = "10")]
+        pub cooldown_class: Option<i32>,
     }
 }

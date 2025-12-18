@@ -2,6 +2,7 @@
 
 use crate::PvgsReader;
 use chip4::pvgs::{CbvQuery, Digest32};
+use ucf::v1::CharacterBaselineVector;
 
 #[derive(Clone)]
 pub struct LocalPvgsReader<Q: CbvQuery> {
@@ -31,6 +32,10 @@ impl<Q: CbvQuery> PvgsReader for LocalPvgsReader<Q> {
             .get_latest_cbv()
             .and_then(|cbv| cbv.cbv_digest)
             .and_then(Self::digest_from_proto)
+    }
+
+    fn get_latest_cbv(&self) -> Option<CharacterBaselineVector> {
+        self.query.get_latest_cbv().and_then(|cbv| cbv.cbv)
     }
 
     fn get_latest_pev_digest(&self) -> Option<[u8; 32]> {

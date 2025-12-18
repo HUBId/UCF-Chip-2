@@ -7,6 +7,7 @@ pub use local::LocalPvgsReader;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use ucf::v1::CharacterBaselineVector;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct PvgsClientConfig {
@@ -31,6 +32,10 @@ pub enum PvgsError {
 pub trait PvgsReader: Send + Sync {
     fn get_latest_cbv_digest(&self) -> Option<[u8; 32]>;
 
+    fn get_latest_cbv(&self) -> Option<CharacterBaselineVector> {
+        None
+    }
+
     fn get_latest_pev_digest(&self) -> Option<[u8; 32]> {
         None
     }
@@ -53,12 +58,24 @@ pub struct MockPvgsReader {
     pub cbv_digest: Option<[u8; 32]>,
     pub pev_digest: Option<[u8; 32]>,
     pub ruleset_digest: Option<[u8; 32]>,
+    pub cbv: Option<CharacterBaselineVector>,
 }
 
 impl MockPvgsReader {
     pub fn with_cbv(cbv_digest: [u8; 32]) -> Self {
+        Self::with_cbv_digest(cbv_digest)
+    }
+
+    pub fn with_cbv_digest(cbv_digest: [u8; 32]) -> Self {
         Self {
             cbv_digest: Some(cbv_digest),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_cbv_vector(cbv: CharacterBaselineVector) -> Self {
+        Self {
+            cbv: Some(cbv),
             ..Default::default()
         }
     }
@@ -67,6 +84,10 @@ impl MockPvgsReader {
 impl PvgsReader for MockPvgsReader {
     fn get_latest_cbv_digest(&self) -> Option<[u8; 32]> {
         self.cbv_digest
+    }
+
+    fn get_latest_cbv(&self) -> Option<CharacterBaselineVector> {
+        self.cbv.clone()
     }
 
     fn get_latest_pev_digest(&self) -> Option<[u8; 32]> {
@@ -145,6 +166,22 @@ mod tests {
     }
 
     #[test]
+    fn mock_reader_exposes_cbv_vector() {
+        let cbv = CharacterBaselineVector {
+            baseline_caution_offset: 1,
+            baseline_novelty_dampening_offset: 0,
+            baseline_approval_strictness_offset: 0,
+            baseline_export_strictness_offset: 0,
+            baseline_chain_conservatism_offset: 0,
+            baseline_cooldown_multiplier_class: 0,
+        };
+        let reader = MockPvgsReader::with_cbv_vector(cbv.clone());
+
+        assert_eq!(reader.get_latest_cbv(), Some(cbv));
+        assert!(reader.get_latest_cbv_digest().is_none());
+    }
+
+    #[test]
     fn mock_writer_records_commit() {
         let mut writer = MockPvgsWriter::default();
         let digest = [2u8; 32];
@@ -184,6 +221,7 @@ mod tests {
             cbv_digest: Some(Digest32::from_array(digest)),
             proof_receipt_ref: Some(vec![1, 2, 3]),
             signature: Some(vec![4, 5, 6]),
+            cbv: None,
         };
         store.commit_cbv_update(cbv);
 
@@ -201,10 +239,36 @@ mod tests {
             }),
             proof_receipt_ref: None,
             signature: None,
+            cbv: None,
         };
         store.commit_cbv_update(cbv);
 
         let reader = LocalPvgsReader::new(store);
         assert!(reader.get_latest_cbv_digest().is_none());
+    }
+
+    #[test]
+    fn local_reader_exposes_full_cbv_when_available() {
+        let store = InMemoryPvgs::new();
+        let cbv = CharacterBaselineVector {
+            baseline_caution_offset: 2,
+            baseline_novelty_dampening_offset: 2,
+            baseline_approval_strictness_offset: 1,
+            baseline_export_strictness_offset: 1,
+            baseline_chain_conservatism_offset: 2,
+            baseline_cooldown_multiplier_class: 2,
+        };
+
+        let stored = Cbv {
+            epoch: 1,
+            cbv_digest: Some(Digest32::from_array([1u8; 32])),
+            proof_receipt_ref: None,
+            signature: None,
+            cbv: Some(cbv.clone()),
+        };
+        store.commit_cbv_update(stored);
+
+        let reader = LocalPvgsReader::new(store);
+        assert_eq!(reader.get_latest_cbv(), Some(cbv));
     }
 }

@@ -2,8 +2,8 @@
 
 use blake3::Hasher;
 use profiles::{
-    apply_classification, classify_signal_frame, decide_with_fallback, ControlDecision,
-    ProfileState, RegulationConfig,
+    apply_cbv_modifiers, apply_classification, classify_signal_frame, decide_with_fallback,
+    ControlDecision, RegulationConfig,
 };
 use prost::Message;
 use pvgs_client::{PvgsReader, PvgsWriter};
@@ -93,17 +93,15 @@ impl RegulationEngine {
         self.render_control_frame(decision)
     }
 
-    fn render_control_frame(&mut self, decision: ControlDecision) -> ControlFrame {
-        let mut overlays = Overlays {
-            simulate_first: decision.overlays.simulate_first,
-            export_lock: decision.overlays.export_lock,
-            novelty_lock: decision.overlays.novelty_lock,
-        };
-
+    fn render_control_frame(&mut self, mut decision: ControlDecision) -> ControlFrame {
         let cbv_digest = self
             .pvgs_reader
             .as_ref()
             .and_then(|reader| reader.get_latest_cbv_digest());
+        let cbv = self
+            .pvgs_reader
+            .as_ref()
+            .and_then(|reader| reader.get_latest_cbv());
         let pev_digest = self
             .pvgs_reader
             .as_ref()
@@ -113,8 +111,21 @@ impl RegulationEngine {
             && self.config.character_baselines.cbv_influence_enabled
             && self.config.character_baselines.novelty_lock_on_cbv
         {
-            overlays.novelty_lock = true;
+            decision.overlays.novelty_lock = true;
         }
+
+        if cbv_digest.is_some() && self.config.character_baselines.cbv_influence_enabled {
+            decision.approval_mode = self.config.character_baselines.strict_approval_mode.clone();
+        }
+
+        let decision = apply_cbv_modifiers(decision, cbv);
+
+        let overlays = Overlays {
+            simulate_first: decision.overlays.simulate_first,
+            export_lock: decision.overlays.export_lock,
+            novelty_lock: decision.overlays.novelty_lock,
+            chain_tightening: decision.overlays.chain_tightening,
+        };
 
         let profile = ActiveProfile {
             profile: decision.profile.as_str().to_string(),
@@ -137,7 +148,9 @@ impl RegulationEngine {
             control_frame_digest: None,
             character_epoch_digest: cbv_digest.map(|digest| digest.to_vec()),
             policy_ecology_digest: pev_digest.map(|digest| digest.to_vec()),
-            approval_mode: Some(self.approval_mode_for(decision.profile, cbv_digest.is_some())),
+            approval_mode: Some(decision.approval_mode.clone()),
+            deescalation_lock: decision.deescalation_lock.then_some(true),
+            cooldown_class: Some(decision.cooldown_class as i32),
         };
 
         let mut buf = Vec::new();
@@ -188,14 +201,6 @@ impl RegulationEngine {
 
         mask_cfg.to_tool_class_mask()
     }
-
-    fn approval_mode_for(&self, profile: ProfileState, cbv_present: bool) -> String {
-        if cbv_present && self.config.character_baselines.cbv_influence_enabled {
-            return self.config.character_baselines.strict_approval_mode.clone();
-        }
-
-        self.config.profiles.get(profile).approval_mode.clone()
-    }
 }
 
 #[cfg(test)]
@@ -205,8 +210,8 @@ mod tests {
     use pvgs_client::{MockPvgsReader, PvgsError};
     use std::sync::{Arc, Mutex};
     use ucf::v1::{
-        ExecStats, IntegrityStateClass, PolicyStats, ReasonCode, ReceiptStats, SignalFrame,
-        WindowKind,
+        CharacterBaselineVector, ExecStats, IntegrityStateClass, LevelClass, PolicyStats,
+        ReasonCode, ReceiptStats, SignalFrame, WindowKind,
     };
 
     type EvidenceLog = Arc<Mutex<Vec<(String, [u8; 32])>>>;
@@ -323,7 +328,15 @@ mod tests {
         let mut config = RegulationConfig::fallback();
         config.character_baselines.cbv_influence_enabled = true;
 
-        let reader = MockPvgsReader::with_cbv(cbv_digest(4));
+        let mut reader = MockPvgsReader::with_cbv(cbv_digest(4));
+        reader.cbv = Some(CharacterBaselineVector {
+            baseline_caution_offset: 2,
+            baseline_novelty_dampening_offset: 2,
+            baseline_approval_strictness_offset: 1,
+            baseline_export_strictness_offset: 1,
+            baseline_chain_conservatism_offset: 2,
+            baseline_cooldown_multiplier_class: 2,
+        });
 
         let mut engine_a = RegulationEngine::new(config.clone());
         engine_a.set_pvgs_reader(reader.clone());
@@ -414,10 +427,13 @@ mod tests {
                 simulate_first: true,
                 export_lock: false,
                 novelty_lock: false,
+                chain_tightening: false,
             },
             deescalation_lock: false,
             missing_frame_override: false,
             profile_reason_codes: vec![ReasonCode::ReIntegrityDegraded],
+            approval_mode: "monitor".to_string(),
+            cooldown_class: LevelClass::Low,
         };
 
         let mask = engine.toolclass_mask_for(&decision);
@@ -443,6 +459,7 @@ mod tests {
                 simulate_first: true,
                 export_lock: true,
                 novelty_lock: true,
+                chain_tightening: false,
             },
             deescalation_lock: true,
             missing_frame_override: false,
@@ -450,6 +467,8 @@ mod tests {
                 ReasonCode::RcThIntegrityCompromise,
                 ReasonCode::RcGeExecDispatchBlocked,
             ],
+            approval_mode: "restricted".to_string(),
+            cooldown_class: LevelClass::High,
         };
 
         let control_frame = engine.render_control_frame(decision);

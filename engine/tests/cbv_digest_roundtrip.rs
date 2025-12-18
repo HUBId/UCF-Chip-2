@@ -29,6 +29,7 @@ fn cbv_update(epoch: u64, byte: u8) -> Cbv {
         cbv_digest: Some(Digest32::from_array([byte; 32])),
         proof_receipt_ref: Some(vec![0xAA]),
         signature: Some(vec![0xBB]),
+        cbv: None,
     }
 }
 

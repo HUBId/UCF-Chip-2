@@ -70,6 +70,7 @@ name = "chip4"
 version = "0.1.0"
 dependencies = [
  "prost",
+ "ucf-protocol",
 ]
 
 [[package]]
@@ -211,6 +212,7 @@ dependencies = [
  "chip4",
  "serde",
  "thiserror",
+ "ucf-protocol",
 ]
 
 [[package]]
