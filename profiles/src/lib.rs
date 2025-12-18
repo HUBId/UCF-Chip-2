@@ -209,6 +209,7 @@ mod tests {
         let config = RegulationConfig::load_from_dir(workspace_config_dir()).unwrap();
         assert_eq!(config.windowing.short.max_records, 50);
         assert!(config.profiles.m0_research.toolclass_mask.export);
+        assert!(!config.character_baselines.cbv_influence_enabled);
     }
 
     #[test]

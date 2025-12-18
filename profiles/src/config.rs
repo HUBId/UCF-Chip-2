@@ -12,6 +12,7 @@ const CLASS_THRESHOLDS_FILE: &str = "class_thresholds.yaml";
 const REGULATOR_PROFILES_FILE: &str = "regulator_profiles.yaml";
 const REGULATOR_OVERLAYS_FILE: &str = "regulator_overlays.yaml";
 const REGULATOR_UPDATE_TABLES_FILE: &str = "regulator_update_tables.yaml";
+const BASELINE_MODIFIERS_FILE: &str = "baseline_modifiers.yaml";
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -218,6 +219,27 @@ pub struct OverlayConfig {
     pub novelty_lock: OverlayEffect,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CharacterBaselineConfig {
+    #[serde(default)]
+    pub cbv_influence_enabled: bool,
+    #[serde(default = "default_strict_approval_mode")]
+    pub strict_approval_mode: String,
+    #[serde(default = "default_novelty_lock_on_cbv")]
+    pub novelty_lock_on_cbv: bool,
+}
+
+impl Default for CharacterBaselineConfig {
+    fn default() -> Self {
+        CharacterBaselineConfig {
+            cbv_influence_enabled: false,
+            strict_approval_mode: default_strict_approval_mode(),
+            novelty_lock_on_cbv: default_novelty_lock_on_cbv(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RuleCondition {
@@ -343,6 +365,8 @@ pub struct RegulationConfig {
     pub profiles: ProfileSet,
     pub overlays: OverlayConfig,
     pub update_tables: UpdateTablesConfig,
+    #[serde(default)]
+    pub character_baselines: CharacterBaselineConfig,
 }
 
 impl RegulationConfig {
@@ -354,6 +378,7 @@ impl RegulationConfig {
             profiles: load_file(base.join(REGULATOR_PROFILES_FILE))?,
             overlays: load_file(base.join(REGULATOR_OVERLAYS_FILE))?,
             update_tables: load_file(base.join(REGULATOR_UPDATE_TABLES_FILE))?,
+            character_baselines: load_optional_file(base.join(BASELINE_MODIFIERS_FILE))?,
         })
     }
 
@@ -570,6 +595,7 @@ impl RegulationConfig {
                     },
                 }],
             },
+            character_baselines: CharacterBaselineConfig::default(),
         }
     }
 }
@@ -580,4 +606,23 @@ fn load_file<T: for<'de> Deserialize<'de>>(path: PathBuf) -> Result<T, ConfigErr
         source,
     })?;
     serde_yaml::from_reader(reader).map_err(|source| ConfigError::Parse { path, source })
+}
+
+fn load_optional_file<T>(path: PathBuf) -> Result<T, ConfigError>
+where
+    T: for<'de> Deserialize<'de> + Default,
+{
+    if path.exists() {
+        load_file(path)
+    } else {
+        Ok(T::default())
+    }
+}
+
+fn default_strict_approval_mode() -> String {
+    "STRICT".to_string()
+}
+
+fn default_novelty_lock_on_cbv() -> bool {
+    true
 }

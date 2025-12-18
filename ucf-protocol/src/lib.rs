@@ -133,5 +133,11 @@ pub mod v1 {
         pub profile_reason_codes: ::prost::alloc::vec::Vec<i32>,
         #[prost(bytes, optional, tag = "5")]
         pub control_frame_digest: Option<::prost::alloc::vec::Vec<u8>>,
+        #[prost(bytes, optional, tag = "6")]
+        pub character_epoch_digest: Option<::prost::alloc::vec::Vec<u8>>,
+        #[prost(bytes, optional, tag = "7")]
+        pub policy_ecology_digest: Option<::prost::alloc::vec::Vec<u8>>,
+        #[prost(string, optional, tag = "8")]
+        pub approval_mode: Option<::prost::alloc::string::String>,
     }
 }
