@@ -43,6 +43,7 @@ pub mod v1 {
         ThExfilHighConfidence = 10,
         ThPolicyProbing = 11,
         RcGvCbvUpdated = 12,
+        RcGvPevUpdated = 13,
         RcCdDlpSecretPattern = 20,
         RcCdDlpObfuscation = 21,
         RcCdDlpStegano = 22,
@@ -62,6 +63,18 @@ pub mod v1 {
         pub baseline_chain_conservatism_offset: i32,
         #[prost(int32, tag = "6")]
         pub baseline_cooldown_multiplier_class: i32,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct PolicyEcologyVector {
+        #[prost(int32, tag = "1")]
+        pub conservatism_bias: i32,
+        #[prost(int32, tag = "2")]
+        pub novelty_penalty_bias: i32,
+        #[prost(int32, tag = "3")]
+        pub manipulation_aversion_bias: i32,
+        #[prost(int32, tag = "4")]
+        pub reversibility_bias: i32,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]

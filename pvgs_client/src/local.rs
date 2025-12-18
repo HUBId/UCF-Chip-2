@@ -1,8 +1,8 @@
 #![cfg(any(test, feature = "local-pvgs"))]
 
 use crate::PvgsReader;
-use chip4::pvgs::{CbvQuery, Digest32};
-use ucf::v1::CharacterBaselineVector;
+use chip4::pvgs::{CbvQuery, Digest32, PevQuery};
+use ucf::v1::{CharacterBaselineVector, PolicyEcologyVector};
 
 #[derive(Clone)]
 pub struct LocalPvgsReader<Q: CbvQuery> {
@@ -26,7 +26,7 @@ impl<Q: CbvQuery> LocalPvgsReader<Q> {
     }
 }
 
-impl<Q: CbvQuery> PvgsReader for LocalPvgsReader<Q> {
+impl<Q: CbvQuery + PevQuery> PvgsReader for LocalPvgsReader<Q> {
     fn get_latest_cbv_digest(&self) -> Option<[u8; 32]> {
         self.query
             .get_latest_cbv()
@@ -39,6 +39,13 @@ impl<Q: CbvQuery> PvgsReader for LocalPvgsReader<Q> {
     }
 
     fn get_latest_pev_digest(&self) -> Option<[u8; 32]> {
-        None
+        self.query
+            .get_latest_pev()
+            .and_then(|pev| pev.pev_digest)
+            .and_then(Self::digest_from_proto)
+    }
+
+    fn get_latest_pev(&self) -> Option<PolicyEcologyVector> {
+        self.query.get_latest_pev().and_then(|pev| pev.pev)
     }
 }

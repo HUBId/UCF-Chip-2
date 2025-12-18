@@ -2,8 +2,8 @@
 
 use blake3::Hasher;
 use profiles::{
-    apply_cbv_modifiers, apply_classification, classify_signal_frame, decide_with_fallback,
-    ControlDecision, RegulationConfig,
+    apply_cbv_modifiers, apply_classification, apply_pev_modifiers, classify_signal_frame,
+    decide_with_fallback, ControlDecision, RegulationConfig,
 };
 use prost::Message;
 use pvgs_client::{PvgsReader, PvgsWriter};
@@ -106,6 +106,10 @@ impl RegulationEngine {
             .pvgs_reader
             .as_ref()
             .and_then(|reader| reader.get_latest_pev_digest());
+        let pev = self
+            .pvgs_reader
+            .as_ref()
+            .and_then(|reader| reader.get_latest_pev());
 
         if cbv_digest.is_some()
             && self.config.character_baselines.cbv_influence_enabled
@@ -119,6 +123,7 @@ impl RegulationEngine {
         }
 
         let decision = apply_cbv_modifiers(decision, cbv);
+        let decision = apply_pev_modifiers(decision, pev);
 
         let overlays = Overlays {
             simulate_first: decision.overlays.simulate_first,
@@ -259,6 +264,19 @@ mod tests {
         [byte; 32]
     }
 
+    fn pev_digest(byte: u8) -> [u8; 32] {
+        [byte; 32]
+    }
+
+    fn pev_vector() -> ucf::v1::PolicyEcologyVector {
+        ucf::v1::PolicyEcologyVector {
+            conservatism_bias: 0,
+            novelty_penalty_bias: 0,
+            manipulation_aversion_bias: 0,
+            reversibility_bias: 0,
+        }
+    }
+
     #[test]
     fn digest_is_deterministic() {
         let mut engine = RegulationEngine::default();
@@ -292,6 +310,30 @@ mod tests {
     }
 
     #[test]
+    fn pev_digest_embeds_and_changes_control_frame_hash() {
+        let frame = base_frame();
+
+        let mut reader_a = MockPvgsReader::with_pev_digest(pev_digest(8));
+        reader_a.pev = Some(pev_vector());
+        let mut engine_with_pev_a = RegulationEngine::default();
+        engine_with_pev_a.set_pvgs_reader(reader_a);
+        let control_a = engine_with_pev_a.on_signal_frame(frame.clone(), 1);
+
+        let mut reader_b = MockPvgsReader::with_pev_digest(pev_digest(9));
+        reader_b.pev = Some(pev_vector());
+        let mut engine_with_pev_b = RegulationEngine::default();
+        engine_with_pev_b.set_pvgs_reader(reader_b);
+        let control_b = engine_with_pev_b.on_signal_frame(frame, 1);
+
+        assert_eq!(control_a.policy_ecology_digest, Some(vec![8u8; 32]));
+        assert_eq!(control_b.policy_ecology_digest, Some(vec![9u8; 32]));
+        assert_ne!(
+            control_a.control_frame_digest,
+            control_b.control_frame_digest
+        );
+    }
+
+    #[test]
     fn cbv_absence_is_stable() {
         let frame = base_frame();
 
@@ -302,6 +344,23 @@ mod tests {
         let control_b = engine_b.on_signal_frame(frame, 1);
 
         assert!(control_a.character_epoch_digest.is_none());
+        assert_eq!(
+            control_a.control_frame_digest,
+            control_b.control_frame_digest
+        );
+    }
+
+    #[test]
+    fn pev_absence_is_stable() {
+        let frame = base_frame();
+
+        let mut engine_a = RegulationEngine::default();
+        let control_a = engine_a.on_signal_frame(frame.clone(), 1);
+
+        let mut engine_b = RegulationEngine::default();
+        let control_b = engine_b.on_signal_frame(frame, 1);
+
+        assert!(control_a.policy_ecology_digest.is_none());
         assert_eq!(
             control_a.control_frame_digest,
             control_b.control_frame_digest
@@ -321,6 +380,73 @@ mod tests {
         let control = engine.on_signal_frame(base_frame(), 1);
         assert_eq!(control.approval_mode.as_deref(), Some("STRICT"));
         assert!(control.overlays.unwrap().novelty_lock);
+    }
+
+    #[test]
+    fn pev_conservatism_bias_enforces_strict_and_lock() {
+        let reader = MockPvgsReader::with_pev_vector(ucf::v1::PolicyEcologyVector {
+            conservatism_bias: 1,
+            novelty_penalty_bias: 0,
+            manipulation_aversion_bias: 0,
+            reversibility_bias: 0,
+        });
+
+        let mut engine = RegulationEngine::default();
+        engine.set_pvgs_reader(reader);
+
+        let control = engine.on_signal_frame(base_frame(), 1);
+        assert_eq!(control.approval_mode.as_deref(), Some("STRICT"));
+        assert_eq!(control.deescalation_lock, Some(true));
+    }
+
+    #[test]
+    fn pev_novelty_bias_enables_lock() {
+        let reader = MockPvgsReader::with_pev_vector(ucf::v1::PolicyEcologyVector {
+            conservatism_bias: 0,
+            novelty_penalty_bias: 1,
+            manipulation_aversion_bias: 0,
+            reversibility_bias: 0,
+        });
+
+        let mut engine = RegulationEngine::default();
+        engine.set_pvgs_reader(reader);
+
+        let control = engine.on_signal_frame(base_frame(), 1);
+        assert!(control.overlays.unwrap().novelty_lock);
+    }
+
+    #[test]
+    fn pev_manipulation_bias_enables_export_lock() {
+        let reader = MockPvgsReader::with_pev_vector(ucf::v1::PolicyEcologyVector {
+            conservatism_bias: 0,
+            novelty_penalty_bias: 0,
+            manipulation_aversion_bias: 1,
+            reversibility_bias: 0,
+        });
+
+        let mut engine = RegulationEngine::default();
+        engine.set_pvgs_reader(reader);
+
+        let control = engine.on_signal_frame(base_frame(), 1);
+        assert!(control.overlays.unwrap().export_lock);
+    }
+
+    #[test]
+    fn pev_reversibility_bias_prefers_simulation() {
+        let reader = MockPvgsReader::with_pev_vector(ucf::v1::PolicyEcologyVector {
+            conservatism_bias: 0,
+            novelty_penalty_bias: 0,
+            manipulation_aversion_bias: 0,
+            reversibility_bias: 1,
+        });
+
+        let mut engine = RegulationEngine::default();
+        engine.set_pvgs_reader(reader);
+
+        let control = engine.on_signal_frame(base_frame(), 1);
+        let overlays = control.overlays.unwrap();
+        assert!(overlays.simulate_first);
+        assert!(overlays.chain_tightening);
     }
 
     #[test]
@@ -346,6 +472,31 @@ mod tests {
         engine_b.set_pvgs_reader(reader);
         let control_b = engine_b.on_signal_frame(base_frame(), 1);
 
+        assert_eq!(
+            control_a.control_frame_digest,
+            control_b.control_frame_digest
+        );
+    }
+
+    #[test]
+    fn pev_digest_preserves_determinism_with_same_inputs() {
+        let mut reader = MockPvgsReader::with_pev_digest(pev_digest(7));
+        reader.pev = Some(ucf::v1::PolicyEcologyVector {
+            conservatism_bias: 1,
+            novelty_penalty_bias: 1,
+            manipulation_aversion_bias: 1,
+            reversibility_bias: 1,
+        });
+
+        let mut engine_a = RegulationEngine::default();
+        engine_a.set_pvgs_reader(reader.clone());
+        let control_a = engine_a.on_signal_frame(base_frame(), 1);
+
+        let mut engine_b = RegulationEngine::default();
+        engine_b.set_pvgs_reader(reader);
+        let control_b = engine_b.on_signal_frame(base_frame(), 1);
+
+        assert_eq!(control_a.policy_ecology_digest, Some(vec![7u8; 32]));
         assert_eq!(
             control_a.control_frame_digest,
             control_b.control_frame_digest
