@@ -384,8 +384,7 @@ mod tests {
 
     #[test]
     fn pev_conservatism_bias_enforces_strict_and_lock() {
-        let mut reader = MockPvgsReader::default();
-        reader.pev = Some(ucf::v1::PolicyEcologyVector {
+        let reader = MockPvgsReader::with_pev_vector(ucf::v1::PolicyEcologyVector {
             conservatism_bias: 1,
             novelty_penalty_bias: 0,
             manipulation_aversion_bias: 0,
@@ -402,8 +401,7 @@ mod tests {
 
     #[test]
     fn pev_novelty_bias_enables_lock() {
-        let mut reader = MockPvgsReader::default();
-        reader.pev = Some(ucf::v1::PolicyEcologyVector {
+        let reader = MockPvgsReader::with_pev_vector(ucf::v1::PolicyEcologyVector {
             conservatism_bias: 0,
             novelty_penalty_bias: 1,
             manipulation_aversion_bias: 0,
@@ -419,8 +417,7 @@ mod tests {
 
     #[test]
     fn pev_manipulation_bias_enables_export_lock() {
-        let mut reader = MockPvgsReader::default();
-        reader.pev = Some(ucf::v1::PolicyEcologyVector {
+        let reader = MockPvgsReader::with_pev_vector(ucf::v1::PolicyEcologyVector {
             conservatism_bias: 0,
             novelty_penalty_bias: 0,
             manipulation_aversion_bias: 1,
@@ -436,8 +433,7 @@ mod tests {
 
     #[test]
     fn pev_reversibility_bias_prefers_simulation() {
-        let mut reader = MockPvgsReader::default();
-        reader.pev = Some(ucf::v1::PolicyEcologyVector {
+        let reader = MockPvgsReader::with_pev_vector(ucf::v1::PolicyEcologyVector {
             conservatism_bias: 0,
             novelty_penalty_bias: 0,
             manipulation_aversion_bias: 0,
