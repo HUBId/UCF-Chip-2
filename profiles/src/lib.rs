@@ -6,7 +6,9 @@ pub mod config;
 use rsv::RsvState;
 use serde::{de, Deserialize, Serialize};
 use thiserror::Error;
-use ucf::v1::{CharacterBaselineVector, IntegrityStateClass, LevelClass, ReasonCode};
+use ucf::v1::{
+    CharacterBaselineVector, IntegrityStateClass, LevelClass, PolicyEcologyVector, ReasonCode,
+};
 
 pub use classification::{classify_signal_frame, ClassifiedSignals};
 pub use config::*;
@@ -244,6 +246,51 @@ pub fn apply_cbv_modifiers(
     base
 }
 
+pub fn apply_pev_modifiers(
+    mut base: ControlDecision,
+    pev: Option<PolicyEcologyVector>,
+) -> ControlDecision {
+    let Some(pev) = pev else {
+        return base;
+    };
+
+    let mut pev_triggered = false;
+
+    if pev.conservatism_bias >= 1 {
+        pev_triggered = true;
+        if !base.approval_mode.eq_ignore_ascii_case("STRICT") {
+            base.approval_mode = "STRICT".to_string();
+        }
+        base.deescalation_lock = true;
+    }
+
+    if pev.novelty_penalty_bias >= 1 {
+        pev_triggered = true;
+        base.overlays.novelty_lock = true;
+    }
+
+    if pev.manipulation_aversion_bias >= 1 {
+        pev_triggered = true;
+        base.overlays.export_lock = true;
+    }
+
+    if pev.reversibility_bias >= 1 {
+        pev_triggered = true;
+        base.overlays.simulate_first = true;
+        base.overlays.chain_tightening = true;
+    }
+
+    if pev_triggered
+        && !base
+            .profile_reason_codes
+            .contains(&ReasonCode::RcGvPevUpdated)
+    {
+        base.profile_reason_codes.push(ReasonCode::RcGvPevUpdated);
+    }
+
+    base
+}
+
 pub fn apply_classification(rsv: &mut RsvState, classified: &ClassifiedSignals, timestamp_ms: u64) {
     rsv.last_seen_frame_ts_ms = Some(timestamp_ms);
     rsv.missing_frame_counter = 0;
@@ -296,6 +343,15 @@ mod tests {
             baseline_export_strictness_offset: 0,
             baseline_chain_conservatism_offset: 0,
             baseline_cooldown_multiplier_class: 0,
+        }
+    }
+
+    fn pev_template() -> PolicyEcologyVector {
+        PolicyEcologyVector {
+            conservatism_bias: 0,
+            novelty_penalty_bias: 0,
+            manipulation_aversion_bias: 0,
+            reversibility_bias: 0,
         }
     }
 
@@ -457,5 +513,70 @@ mod tests {
         assert!(decision.overlays.chain_tightening);
         assert!(decision.deescalation_lock);
         assert_eq!(decision.cooldown_class, LevelClass::High);
+    }
+
+    #[test]
+    fn pev_absent_leaves_decision_unchanged() {
+        let base = base_decision();
+        let decision = apply_pev_modifiers(base.clone(), None);
+
+        assert_eq!(decision, base);
+    }
+
+    #[test]
+    fn pev_conservatism_bias_enforces_strict_and_lock() {
+        let mut pev = pev_template();
+        pev.conservatism_bias = 1;
+
+        let decision = apply_pev_modifiers(base_decision(), Some(pev));
+
+        assert_eq!(decision.approval_mode, "STRICT");
+        assert!(decision.deescalation_lock);
+        assert!(decision
+            .profile_reason_codes
+            .contains(&ReasonCode::RcGvPevUpdated));
+    }
+
+    #[test]
+    fn pev_novelty_penalty_enables_lock() {
+        let mut pev = pev_template();
+        pev.novelty_penalty_bias = 1;
+
+        let decision = apply_pev_modifiers(base_decision(), Some(pev));
+        assert!(decision.overlays.novelty_lock);
+    }
+
+    #[test]
+    fn pev_manipulation_aversion_enables_export_lock() {
+        let mut pev = pev_template();
+        pev.manipulation_aversion_bias = 1;
+
+        let decision = apply_pev_modifiers(base_decision(), Some(pev));
+        assert!(decision.overlays.export_lock);
+    }
+
+    #[test]
+    fn pev_reversibility_prefers_simulation() {
+        let mut pev = pev_template();
+        pev.reversibility_bias = 1;
+
+        let decision = apply_pev_modifiers(base_decision(), Some(pev));
+        assert!(decision.overlays.simulate_first);
+        assert!(decision.overlays.chain_tightening);
+    }
+
+    #[test]
+    fn pev_does_not_loosen_existing_restrictions() {
+        let pev = pev_template();
+        let mut base = base_decision();
+        base.approval_mode = "STRICT".to_string();
+        base.overlays.export_lock = true;
+        base.overlays.novelty_lock = true;
+
+        let decision = apply_pev_modifiers(base.clone(), Some(pev));
+        assert_eq!(decision.approval_mode, "STRICT");
+        assert!(decision.overlays.export_lock);
+        assert!(decision.overlays.novelty_lock);
+        assert_eq!(decision.profile_reason_codes, base.profile_reason_codes);
     }
 }

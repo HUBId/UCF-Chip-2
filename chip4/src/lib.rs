@@ -3,7 +3,7 @@
 pub mod pvgs {
     use prost::Message;
     use std::sync::{Arc, Mutex};
-    use ucf::v1::CharacterBaselineVector;
+    use ucf::v1::{CharacterBaselineVector, PolicyEcologyVector};
 
     #[derive(Clone, PartialEq, Message)]
     pub struct Digest32 {
@@ -41,9 +41,24 @@ pub mod pvgs {
         fn get_latest_cbv(&self) -> Option<Cbv>;
     }
 
+    #[derive(Clone, PartialEq, Message)]
+    pub struct Pev {
+        #[prost(uint64, tag = "1")]
+        pub epoch: u64,
+        #[prost(message, optional, tag = "2")]
+        pub pev_digest: Option<Digest32>,
+        #[prost(message, optional, tag = "3")]
+        pub pev: Option<PolicyEcologyVector>,
+    }
+
+    pub trait PevQuery: Clone + Send + Sync {
+        fn get_latest_pev(&self) -> Option<Pev>;
+    }
+
     #[derive(Clone, Default)]
     pub struct InMemoryPvgs {
         latest_cbv: Arc<Mutex<Option<Cbv>>>,
+        latest_pev: Arc<Mutex<Option<Pev>>>,
     }
 
     impl InMemoryPvgs {
@@ -61,11 +76,28 @@ pub mod pvgs {
                 *guard = Some(update);
             }
         }
+
+        pub fn commit_pev_update(&self, update: Pev) {
+            let mut guard = self.latest_pev.lock().unwrap();
+            if guard
+                .as_ref()
+                .map(|existing| existing.epoch <= update.epoch)
+                .unwrap_or(true)
+            {
+                *guard = Some(update);
+            }
+        }
     }
 
     impl CbvQuery for InMemoryPvgs {
         fn get_latest_cbv(&self) -> Option<Cbv> {
             self.latest_cbv.lock().unwrap().clone()
+        }
+    }
+
+    impl PevQuery for InMemoryPvgs {
+        fn get_latest_pev(&self) -> Option<Pev> {
+            self.latest_pev.lock().unwrap().clone()
         }
     }
 }

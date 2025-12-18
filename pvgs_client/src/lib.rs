@@ -7,7 +7,7 @@ pub use local::LocalPvgsReader;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use ucf::v1::CharacterBaselineVector;
+use ucf::v1::{CharacterBaselineVector, PolicyEcologyVector};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct PvgsClientConfig {
@@ -40,6 +40,10 @@ pub trait PvgsReader: Send + Sync {
         None
     }
 
+    fn get_latest_pev(&self) -> Option<PolicyEcologyVector> {
+        None
+    }
+
     fn get_latest_ruleset_digest(&self) -> Option<[u8; 32]> {
         None
     }
@@ -59,6 +63,7 @@ pub struct MockPvgsReader {
     pub pev_digest: Option<[u8; 32]>,
     pub ruleset_digest: Option<[u8; 32]>,
     pub cbv: Option<CharacterBaselineVector>,
+    pub pev: Option<PolicyEcologyVector>,
 }
 
 impl MockPvgsReader {
@@ -79,6 +84,20 @@ impl MockPvgsReader {
             ..Default::default()
         }
     }
+
+    pub fn with_pev_vector(pev: PolicyEcologyVector) -> Self {
+        Self {
+            pev: Some(pev),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_pev_digest(pev_digest: [u8; 32]) -> Self {
+        Self {
+            pev_digest: Some(pev_digest),
+            ..Default::default()
+        }
+    }
 }
 
 impl PvgsReader for MockPvgsReader {
@@ -92,6 +111,10 @@ impl PvgsReader for MockPvgsReader {
 
     fn get_latest_pev_digest(&self) -> Option<[u8; 32]> {
         self.pev_digest
+    }
+
+    fn get_latest_pev(&self) -> Option<PolicyEcologyVector> {
+        self.pev.clone()
     }
 
     fn get_latest_ruleset_digest(&self) -> Option<[u8; 32]> {
@@ -205,6 +228,20 @@ mod tests {
     }
 
     #[test]
+    fn mock_reader_exposes_pev_vector() {
+        let pev = PolicyEcologyVector {
+            conservatism_bias: 1,
+            novelty_penalty_bias: 0,
+            manipulation_aversion_bias: 0,
+            reversibility_bias: 0,
+        };
+
+        let reader = MockPvgsReader::with_pev_vector(pev.clone());
+        assert_eq!(reader.get_latest_pev(), Some(pev));
+        assert!(reader.get_latest_pev_digest().is_none());
+    }
+
+    #[test]
     fn local_reader_returns_none_without_cbv() {
         let store = InMemoryPvgs::new();
         let reader = LocalPvgsReader::new(store);
@@ -245,6 +282,29 @@ mod tests {
 
         let reader = LocalPvgsReader::new(store);
         assert!(reader.get_latest_cbv_digest().is_none());
+    }
+
+    #[test]
+    fn local_reader_exposes_latest_pev_digest_and_vector() {
+        let store = InMemoryPvgs::new();
+        let digest = [7u8; 32];
+        let pev = ucf::v1::PolicyEcologyVector {
+            conservatism_bias: 1,
+            novelty_penalty_bias: 1,
+            manipulation_aversion_bias: 0,
+            reversibility_bias: 0,
+        };
+
+        let stored = chip4::pvgs::Pev {
+            epoch: 3,
+            pev_digest: Some(Digest32::from_array(digest)),
+            pev: Some(pev.clone()),
+        };
+        store.commit_pev_update(stored);
+
+        let reader = LocalPvgsReader::new(store);
+        assert_eq!(reader.get_latest_pev_digest(), Some(digest));
+        assert_eq!(reader.get_latest_pev(), Some(pev));
     }
 
     #[test]
