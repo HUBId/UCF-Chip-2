@@ -248,8 +248,12 @@ mod tests {
             policy_stats: Some(PolicyStats {
                 deny_count: 0,
                 allow_count: 10,
+                top_reason_codes: Vec::new(),
             }),
-            exec_stats: Some(ExecStats { timeout_count: 0 }),
+            exec_stats: Some(ExecStats {
+                timeout_count: 0,
+                top_reason_codes: Vec::new(),
+            }),
             integrity_state: IntegrityStateClass::Ok as i32,
             top_reason_codes: Vec::new(),
             signal_frame_digest: None,
@@ -257,6 +261,7 @@ mod tests {
                 receipt_missing_count: 0,
                 receipt_invalid_count: 0,
             }),
+            reason_codes: Vec::new(),
         }
     }
 
@@ -554,6 +559,49 @@ mod tests {
         let mask = control.toolclass_mask.unwrap();
         assert!(!mask.export && !mask.write && !mask.execute);
         assert_eq!(control.active_profile.unwrap().profile, "M3_FORENSIC");
+        let overlays = control.overlays.unwrap();
+        assert!(overlays.simulate_first);
+        assert!(overlays.export_lock);
+        assert!(overlays.novelty_lock);
+        assert!(overlays.chain_tightening);
+    }
+
+    #[test]
+    fn replay_mismatch_tightens_profiles_and_overlays() {
+        let mut engine = RegulationEngine::default();
+        let mut frame = base_frame();
+        frame.top_reason_codes = vec![ReasonCode::RcReReplayMismatch as i32];
+
+        let control = engine.on_signal_frame(frame, 1);
+        let overlays = control.overlays.unwrap();
+
+        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
+        assert!(overlays.simulate_first);
+        assert!(overlays.export_lock);
+        assert!(overlays.novelty_lock);
+        assert!(overlays.chain_tightening);
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcReReplayMismatch as i32)));
+        assert_eq!(control.deescalation_lock, Some(true));
+    }
+
+    #[test]
+    fn degraded_integrity_with_replay_mismatch_escalates_profile() {
+        let mut engine = RegulationEngine::default();
+        let mut frame = base_frame();
+        frame.integrity_state = IntegrityStateClass::Degraded as i32;
+        frame.top_reason_codes = vec![ReasonCode::RcReReplayMismatch as i32];
+
+        let control = engine.on_signal_frame(frame, 1);
+
+        assert_eq!(control.active_profile.unwrap().profile, "M2_QUARANTINE");
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcReReplayMismatch as i32)));
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::ReIntegrityDegraded as i32)));
     }
 
     #[test]

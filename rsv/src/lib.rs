@@ -12,6 +12,7 @@ pub struct RsvState {
     pub stability: LevelClass,
     pub divergence: LevelClass,
     pub budget_stress: LevelClass,
+    pub replay_mismatch: LevelClass,
     pub receipt_failures: LevelClass,
     pub receipt_missing_count_window: u32,
     pub receipt_invalid_count_window: u32,
@@ -30,6 +31,7 @@ impl Default for RsvState {
             stability: LevelClass::Low,
             divergence: LevelClass::Low,
             budget_stress: LevelClass::Low,
+            replay_mismatch: LevelClass::Low,
             receipt_failures: LevelClass::Low,
             receipt_missing_count_window: 0,
             receipt_invalid_count_window: 0,
@@ -52,6 +54,7 @@ mod tests {
         assert_eq!(state.threat, LevelClass::Low);
         assert_eq!(state.arousal, LevelClass::Low);
         assert_eq!(state.stability, LevelClass::Low);
+        assert_eq!(state.replay_mismatch, LevelClass::Low);
         assert_eq!(state.receipt_failures, LevelClass::Low);
         assert_eq!(state.receipt_missing_count_window, 0);
         assert_eq!(state.receipt_invalid_count_window, 0);

@@ -250,6 +250,7 @@ pub struct RuleCondition {
     pub stability: Option<LevelClass>,
     pub divergence: Option<LevelClass>,
     pub budget_stress: Option<LevelClass>,
+    pub replay_mismatch: Option<LevelClass>,
     pub missing_frame: Option<bool>,
     pub any: Option<bool>,
 }
@@ -302,6 +303,12 @@ impl RuleCondition {
             }
         }
 
+        if let Some(expected) = self.replay_mismatch {
+            if !level_at_least(signal.replay_mismatch, expected) {
+                return false;
+            }
+        }
+
         if let Some(missing_required) = self.missing_frame {
             if signal.missing_frame != missing_required {
                 return false;
@@ -325,6 +332,7 @@ pub struct ConditionSignals {
     pub stability: LevelClass,
     pub divergence: LevelClass,
     pub budget_stress: LevelClass,
+    pub replay_mismatch: LevelClass,
     pub missing_frame: bool,
 }
 
@@ -572,29 +580,79 @@ impl RegulationConfig {
                 },
             },
             update_tables: UpdateTablesConfig {
-                profile_switch: vec![ProfileSwitchRule {
-                    name: "fallback".to_string(),
-                    conditions: RuleCondition {
-                        any: Some(true),
-                        ..Default::default()
+                profile_switch: vec![
+                    ProfileSwitchRule {
+                        name: "integrity_fail".to_string(),
+                        conditions: RuleCondition {
+                            integrity_state: Some(IntegrityStateClass::Fail),
+                            ..Default::default()
+                        },
+                        set_profile: ProfileState::M3Forensic,
+                        deescalation_lock: Some(true),
+                        reason_codes: vec![ReasonCode::ReIntegrityFail],
                     },
-                    set_profile: ProfileState::M1Restricted,
-                    deescalation_lock: Some(true),
-                    reason_codes: vec![ReasonCode::ReIntegrityDegraded],
-                }],
-                overlay_enable: vec![OverlayEnableRule {
-                    name: "fallback_overlays".to_string(),
-                    conditions: RuleCondition {
-                        any: Some(true),
-                        ..Default::default()
+                    ProfileSwitchRule {
+                        name: "replay_mismatch".to_string(),
+                        conditions: RuleCondition {
+                            replay_mismatch: Some(LevelClass::High),
+                            ..Default::default()
+                        },
+                        set_profile: ProfileState::M1Restricted,
+                        deescalation_lock: Some(true),
+                        reason_codes: vec![ReasonCode::RcReReplayMismatch],
                     },
-                    overlays: OverlaySet {
-                        simulate_first: true,
-                        export_lock: true,
-                        novelty_lock: true,
-                        chain_tightening: true,
+                    ProfileSwitchRule {
+                        name: "fallback".to_string(),
+                        conditions: RuleCondition {
+                            any: Some(true),
+                            ..Default::default()
+                        },
+                        set_profile: ProfileState::M1Restricted,
+                        deescalation_lock: Some(true),
+                        reason_codes: vec![ReasonCode::ReIntegrityDegraded],
                     },
-                }],
+                ],
+                overlay_enable: vec![
+                    OverlayEnableRule {
+                        name: "integrity_fail_overlays".to_string(),
+                        conditions: RuleCondition {
+                            integrity_state: Some(IntegrityStateClass::Fail),
+                            ..Default::default()
+                        },
+                        overlays: OverlaySet {
+                            simulate_first: true,
+                            export_lock: true,
+                            novelty_lock: true,
+                            chain_tightening: true,
+                        },
+                    },
+                    OverlayEnableRule {
+                        name: "replay_mismatch_overlays".to_string(),
+                        conditions: RuleCondition {
+                            replay_mismatch: Some(LevelClass::High),
+                            ..Default::default()
+                        },
+                        overlays: OverlaySet {
+                            simulate_first: true,
+                            export_lock: true,
+                            novelty_lock: true,
+                            chain_tightening: true,
+                        },
+                    },
+                    OverlayEnableRule {
+                        name: "fallback_overlays".to_string(),
+                        conditions: RuleCondition {
+                            any: Some(true),
+                            ..Default::default()
+                        },
+                        overlays: OverlaySet {
+                            simulate_first: true,
+                            export_lock: true,
+                            novelty_lock: true,
+                            chain_tightening: true,
+                        },
+                    },
+                ],
             },
             character_baselines: CharacterBaselineConfig::default(),
         }

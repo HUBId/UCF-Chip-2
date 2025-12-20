@@ -40,6 +40,7 @@ pub mod v1 {
         ReIntegrityDegraded = 2,
         RcGeExecDispatchBlocked = 3,
         RcThIntegrityCompromise = 4,
+        RcReReplayMismatch = 5,
         ThExfilHighConfidence = 10,
         ThPolicyProbing = 11,
         RcGvCbvUpdated = 12,
@@ -91,12 +92,16 @@ pub mod v1 {
         pub deny_count: u32,
         #[prost(uint32, tag = "2")]
         pub allow_count: u32,
+        #[prost(enumeration = "ReasonCode", repeated, tag = "3")]
+        pub top_reason_codes: ::prost::alloc::vec::Vec<i32>,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
     pub struct ExecStats {
         #[prost(uint32, tag = "1")]
         pub timeout_count: u32,
+        #[prost(enumeration = "ReasonCode", repeated, tag = "2")]
+        pub top_reason_codes: ::prost::alloc::vec::Vec<i32>,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
@@ -119,6 +124,8 @@ pub mod v1 {
         pub signal_frame_digest: Option<::prost::alloc::vec::Vec<u8>>,
         #[prost(message, optional, tag = "9")]
         pub receipt_stats: Option<ReceiptStats>,
+        #[prost(enumeration = "ReasonCode", repeated, tag = "10")]
+        pub reason_codes: ::prost::alloc::vec::Vec<i32>,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
