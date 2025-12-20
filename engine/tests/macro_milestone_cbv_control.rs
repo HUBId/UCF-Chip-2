@@ -71,7 +71,7 @@ fn control_frame_unchanged_without_macro_cbv() {
     let control_b = engine_again.on_signal_frame(frame, 1_000);
 
     let overlays = control_a.overlays.as_ref().expect("overlays present");
-    assert_eq!(overlays.novelty_lock, false);
+    assert!(!overlays.novelty_lock);
     assert!(control_a
         .approval_mode
         .as_deref()
