@@ -124,6 +124,7 @@ pub fn decide(
         stability: rsv.stability,
         divergence: rsv.divergence,
         budget_stress: rsv.budget_stress,
+        replay_mismatch: rsv.replay_mismatch,
         missing_frame,
     };
 
@@ -303,6 +304,7 @@ pub fn apply_classification(rsv: &mut RsvState, classified: &ClassifiedSignals, 
     } else {
         classified.exec_reliability_class
     };
+    rsv.replay_mismatch = classified.replay_mismatch_class;
     rsv.receipt_failures = classified.receipt_failures_class;
     rsv.receipt_missing_count_window = classified.receipt_missing_count;
     rsv.receipt_invalid_count_window = classified.receipt_invalid_count;
@@ -314,7 +316,9 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
-    use ucf::v1::{ExecStats, LevelClass, PolicyStats, ReceiptStats, SignalFrame, WindowKind};
+    use ucf::v1::{
+        ExecStats, LevelClass, PolicyStats, ReasonCode, ReceiptStats, SignalFrame, WindowKind,
+    };
 
     fn workspace_config_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -406,8 +410,12 @@ mod tests {
             policy_stats: Some(PolicyStats {
                 deny_count: 6,
                 allow_count: 0,
+                top_reason_codes: Vec::new(),
             }),
-            exec_stats: Some(ExecStats { timeout_count: 0 }),
+            exec_stats: Some(ExecStats {
+                timeout_count: 0,
+                top_reason_codes: Vec::new(),
+            }),
             receipt_stats: Some(ReceiptStats {
                 receipt_missing_count: 0,
                 receipt_invalid_count: 0,
@@ -421,6 +429,33 @@ mod tests {
     }
 
     #[test]
+    fn replay_mismatch_detected_from_nested_stats() {
+        let config = RegulationConfig::load_from_dir(workspace_config_dir()).unwrap();
+        let frame = SignalFrame {
+            window_kind: WindowKind::Short as i32,
+            window_index: Some(1),
+            timestamp_ms: Some(1),
+            policy_stats: Some(PolicyStats {
+                deny_count: 0,
+                allow_count: 0,
+                top_reason_codes: vec![ReasonCode::RcReReplayMismatch as i32],
+            }),
+            exec_stats: Some(ExecStats {
+                timeout_count: 0,
+                top_reason_codes: Vec::new(),
+            }),
+            receipt_stats: Some(ReceiptStats {
+                receipt_missing_count: 0,
+                receipt_invalid_count: 0,
+            }),
+            ..SignalFrame::default()
+        };
+
+        let classified = classify_signal_frame(&frame, &config.thresholds);
+        assert_eq!(classified.replay_mismatch_class, LevelClass::High);
+    }
+
+    #[test]
     fn rules_drive_profiles_and_overlays() {
         let config = RegulationConfig::load_from_dir(workspace_config_dir()).unwrap();
         let mut rsv = RsvState::default();
@@ -431,8 +466,12 @@ mod tests {
             policy_stats: Some(PolicyStats {
                 deny_count: 0,
                 allow_count: 1,
+                top_reason_codes: Vec::new(),
             }),
-            exec_stats: Some(ExecStats { timeout_count: 0 }),
+            exec_stats: Some(ExecStats {
+                timeout_count: 0,
+                top_reason_codes: Vec::new(),
+            }),
             receipt_stats: Some(ReceiptStats {
                 receipt_missing_count: 0,
                 receipt_invalid_count: 2,

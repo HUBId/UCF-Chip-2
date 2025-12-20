@@ -5,6 +5,20 @@ profile_switch:
     deescalation_lock: true
     reason_codes:
       - ReIntegrityFail
+  - name: replay_mismatch_degraded
+    replay_mismatch: High
+    integrity_state: Degraded
+    set_profile: M2_QUARANTINE
+    deescalation_lock: true
+    reason_codes:
+      - RcReReplayMismatch
+      - ReIntegrityDegraded
+  - name: replay_mismatch_high
+    replay_mismatch: High
+    set_profile: M1_RESTRICTED
+    deescalation_lock: true
+    reason_codes:
+      - RcReReplayMismatch
   - name: receipt_failure_high
     receipt_failures: High
     set_profile: M1_RESTRICTED
@@ -29,6 +43,14 @@ overlay_enable:
       simulate_first: true
       export_lock: true
       novelty_lock: true
+      chain_tightening: true
+  - name: replay_mismatch_overlays
+    replay_mismatch: High
+    overlays:
+      simulate_first: true
+      export_lock: true
+      novelty_lock: true
+      chain_tightening: true
   - name: receipt_failures_overlay
     receipt_failures: Med
     overlays:
@@ -41,3 +63,4 @@ overlay_enable:
       simulate_first: true
       export_lock: true
       novelty_lock: true
+      chain_tightening: true

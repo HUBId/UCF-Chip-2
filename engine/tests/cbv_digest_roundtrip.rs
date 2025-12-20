@@ -11,8 +11,12 @@ fn base_frame() -> SignalFrame {
         policy_stats: Some(PolicyStats {
             deny_count: 0,
             allow_count: 1,
+            top_reason_codes: vec![],
         }),
-        exec_stats: Some(ExecStats { timeout_count: 0 }),
+        exec_stats: Some(ExecStats {
+            timeout_count: 0,
+            top_reason_codes: vec![],
+        }),
         integrity_state: IntegrityStateClass::Ok as i32,
         top_reason_codes: vec![],
         signal_frame_digest: None,
@@ -20,6 +24,7 @@ fn base_frame() -> SignalFrame {
             receipt_missing_count: 0,
             receipt_invalid_count: 0,
         }),
+        reason_codes: vec![],
     }
 }
 

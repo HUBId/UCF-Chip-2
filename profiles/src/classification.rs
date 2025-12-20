@@ -20,6 +20,7 @@ pub struct ClassifiedSignals {
     pub receipt_missing_count: u32,
     pub receipt_invalid_count: u32,
     pub dlp_severity_class: LevelClass,
+    pub replay_mismatch_class: LevelClass,
     pub exec_reliability_class: LevelClass,
     pub exec_timeout_count: u32,
     pub missing_data: bool,
@@ -39,6 +40,7 @@ impl ClassifiedSignals {
             receipt_missing_count: 0,
             receipt_invalid_count: 0,
             dlp_severity_class: LevelClass::High,
+            replay_mismatch_class: LevelClass::High,
             exec_reliability_class: LevelClass::High,
             exec_timeout_count: 0,
             missing_data: true,
@@ -90,6 +92,12 @@ pub fn classify_signal_frame(frame: &SignalFrame, cfg: &ThresholdConfig) -> Clas
         &mut missing_data,
     );
 
+    let replay_mismatch_class = if has_replay_mismatch(frame) {
+        LevelClass::High
+    } else {
+        LevelClass::Low
+    };
+
     ClassifiedSignals {
         window_kind,
         integrity_state,
@@ -102,6 +110,7 @@ pub fn classify_signal_frame(frame: &SignalFrame, cfg: &ThresholdConfig) -> Clas
         receipt_missing_count,
         receipt_invalid_count,
         dlp_severity_class,
+        replay_mismatch_class,
         exec_reliability_class,
         exec_timeout_count,
         missing_data,
@@ -191,6 +200,23 @@ fn classify_dlp(
             }
         }
     }
+}
+
+fn has_replay_mismatch(frame: &SignalFrame) -> bool {
+    let mismatch_code = ReasonCode::RcReReplayMismatch as i32;
+
+    frame.top_reason_codes.contains(&mismatch_code)
+        || frame.reason_codes.contains(&mismatch_code)
+        || frame
+            .policy_stats
+            .as_ref()
+            .map(|stats| stats.top_reason_codes.contains(&mismatch_code))
+            .unwrap_or(false)
+        || frame
+            .exec_stats
+            .as_ref()
+            .map(|stats| stats.top_reason_codes.contains(&mismatch_code))
+            .unwrap_or(false)
 }
 
 fn max_level(a: LevelClass, b: LevelClass) -> LevelClass {
