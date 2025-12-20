@@ -7,6 +7,22 @@ pub mod v1 {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
     #[repr(i32)]
+    pub enum MacroMilestoneState {
+        Unknown = 0,
+        Finalized = 1,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
+    #[repr(i32)]
+    pub enum ConsistencyClass {
+        Unknown = 0,
+        ConsistencyLow = 1,
+        ConsistencyMed = 2,
+        ConsistencyHigh = 3,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
+    #[repr(i32)]
     pub enum WindowKind {
         Unknown = 0,
         Short = 1,
@@ -48,6 +64,42 @@ pub mod v1 {
         RcCdDlpSecretPattern = 20,
         RcCdDlpObfuscation = 21,
         RcCdDlpStegano = 22,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
+    #[repr(i32)]
+    pub enum TraitUpdateDirection {
+        Unknown = 0,
+        IncreaseStrictness = 1,
+        DecreaseStrictness = 2,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct TraitUpdate {
+        #[prost(string, tag = "1")]
+        pub trait_name: ::prost::alloc::string::String,
+        #[prost(enumeration = "LevelClass", tag = "2")]
+        pub magnitude: i32,
+        #[prost(enumeration = "TraitUpdateDirection", tag = "3")]
+        pub direction: i32,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct MacroMilestone {
+        #[prost(enumeration = "MacroMilestoneState", tag = "1")]
+        pub state: i32,
+        #[prost(enumeration = "ConsistencyClass", tag = "2")]
+        pub consistency_class: i32,
+        #[prost(message, repeated, tag = "3")]
+        pub trait_updates: ::prost::alloc::vec::Vec<TraitUpdate>,
+        #[prost(bytes, optional, tag = "4")]
+        pub macro_digest: Option<::prost::alloc::vec::Vec<u8>>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct MacroMilestoneAppend {
+        #[prost(message, optional, tag = "1")]
+        pub milestone: Option<MacroMilestone>,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
