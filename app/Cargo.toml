@@ -8,3 +8,4 @@ engine = { path = "../engine" }
 wire = { path = "../wire" }
 hex = "0.4"
 ucf = { package = "ucf-protocol", path = "../ucf-protocol" }
+profiles = { path = "../profiles" }

@@ -1,24 +1,99 @@
 #![forbid(unsafe_code)]
 
-use engine::RegulationEngine;
+use engine::{RegulationEngine, RegulationSnapshot};
 use hex::encode as hex_encode;
+use profiles::ProfileState;
+use std::env;
 use ucf::v1::{
-    ExecStats, IntegrityStateClass, PolicyStats, ReasonCode, ReceiptStats, SignalFrame, WindowKind,
+    ExecStats, IntegrityStateClass, LevelClass, PolicyStats, ReceiptStats, SignalFrame, WindowKind,
 };
-use wire::FrameIngestor;
 
 fn main() {
-    let now_ms = 1;
-    let mut ingestor = FrameIngestor::new();
-    let mut engine = RegulationEngine::default();
+    let mut args = env::args();
+    let _binary = args.next();
+    match args.next().as_deref() {
+        Some("regulator-dump") => run_regulator_dump(),
+        _ => {
+            eprintln!("usage: app regulator-dump");
+            std::process::exit(1);
+        }
+    }
+}
 
-    let signal_frame = SignalFrame {
+fn run_regulator_dump() {
+    let mut engine = RegulationEngine::default();
+    let now_ms = 1;
+    let signal_frame = default_ok_signal_frame(now_ms);
+    let _ = engine.on_signal_frame(signal_frame, now_ms);
+
+    let snapshot = engine.snapshot();
+    println!("{}", format_snapshot(&snapshot));
+}
+
+fn format_snapshot(snapshot: &RegulationSnapshot) -> String {
+    let digest = snapshot
+        .control_frame_digest
+        .map(hex_encode)
+        .unwrap_or_else(|| "NONE".to_string());
+
+    let lines = [
+        format!("profile: {}", format_profile(snapshot.profile)),
+        format!(
+            "overlays: simulate_first={} export_lock={} novelty_lock={}",
+            snapshot.overlays.simulate_first,
+            snapshot.overlays.export_lock,
+            snapshot.overlays.novelty_lock
+        ),
+        format!("deescalation_lock: {}", snapshot.deescalation_lock),
+        format!("control_frame_digest: {}", digest),
+        format!(
+            "rsv: integrity={} threat={} policy_pressure={} arousal={} stability={}",
+            format_integrity(snapshot.rsv_summary.integrity),
+            format_level(snapshot.rsv_summary.threat),
+            format_level(snapshot.rsv_summary.policy_pressure),
+            format_level(snapshot.rsv_summary.arousal),
+            format_level(snapshot.rsv_summary.stability),
+        ),
+    ];
+
+    lines.join("\n")
+}
+
+fn format_profile(profile: ProfileState) -> &'static str {
+    match profile {
+        ProfileState::M0Research => "M0",
+        ProfileState::M1Restricted => "M1",
+        ProfileState::M2Quarantine => "M2",
+        ProfileState::M3Forensic => "M3",
+    }
+}
+
+fn format_integrity(integrity: IntegrityStateClass) -> &'static str {
+    match integrity {
+        IntegrityStateClass::Unknown => "UNKNOWN",
+        IntegrityStateClass::Ok => "OK",
+        IntegrityStateClass::Degraded => "DEGRADED",
+        IntegrityStateClass::Fail => "FAIL",
+    }
+}
+
+fn format_level(level: LevelClass) -> &'static str {
+    match level {
+        LevelClass::Unknown => "UNKNOWN",
+        LevelClass::Low => "LOW",
+        LevelClass::Med => "MED",
+        LevelClass::High => "HIGH",
+    }
+}
+
+fn default_ok_signal_frame(now_ms: u64) -> SignalFrame {
+    SignalFrame {
         window_kind: WindowKind::Short as i32,
         window_index: Some(1),
         timestamp_ms: Some(now_ms),
         policy_stats: Some(PolicyStats {
             deny_count: 0,
-            allow_count: 10,
+            allow_count: 1,
             top_reason_codes: vec![],
         }),
         exec_stats: Some(ExecStats {
@@ -26,45 +101,50 @@ fn main() {
             top_reason_codes: vec![],
         }),
         integrity_state: IntegrityStateClass::Ok as i32,
-        top_reason_codes: vec![ReasonCode::Unknown as i32],
+        top_reason_codes: vec![],
         signal_frame_digest: None,
         receipt_stats: Some(ReceiptStats {
             receipt_missing_count: 0,
             receipt_invalid_count: 0,
         }),
         reason_codes: vec![],
-    };
+    }
+}
 
-    ingestor
-        .ingest_signal_frame(signal_frame.clone())
-        .expect("signal frame should be accepted");
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use engine::RsvSummary;
+    use profiles::OverlaySet;
 
-    let control_frame = engine.on_signal_frame(signal_frame, now_ms);
-    println!(
-        "ControlFrame => profile: {}, overlays: {:?}, toolclass_mask: {:?}, digest: {}",
-        control_frame
-            .active_profile
-            .as_ref()
-            .map(|p| p.profile.clone())
-            .unwrap_or_default(),
-        control_frame.overlays,
-        control_frame.toolclass_mask,
-        control_frame
-            .control_frame_digest
-            .as_ref()
-            .map(hex_encode)
-            .unwrap_or_else(|| "missing".to_string())
-    );
+    #[test]
+    fn formats_snapshot_output() {
+        let snapshot = RegulationSnapshot {
+            profile: ProfileState::M2Quarantine,
+            overlays: OverlaySet {
+                simulate_first: true,
+                export_lock: false,
+                novelty_lock: true,
+                chain_tightening: false,
+            },
+            deescalation_lock: true,
+            control_frame_digest: Some([0xAA; 32]),
+            rsv_summary: RsvSummary {
+                integrity: IntegrityStateClass::Degraded,
+                threat: LevelClass::Med,
+                policy_pressure: LevelClass::High,
+                arousal: LevelClass::Low,
+                stability: LevelClass::Unknown,
+            },
+        };
 
-    let missing_control = engine.on_tick(now_ms + 60_000);
-    println!(
-        "Missing frame decision => profile: {}, overlays: {:?}, toolclass_mask: {:?}",
-        missing_control
-            .active_profile
-            .as_ref()
-            .map(|p| p.profile.clone())
-            .unwrap_or_default(),
-        missing_control.overlays,
-        missing_control.toolclass_mask,
-    );
+        let expected = "profile: M2\n"
+            .to_string()
+            + "overlays: simulate_first=true export_lock=false novelty_lock=true\n"
+            + "deescalation_lock: true\n"
+            + "control_frame_digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+            + "rsv: integrity=DEGRADED threat=MED policy_pressure=HIGH arousal=LOW stability=UNKNOWN";
+
+        assert_eq!(format_snapshot(&snapshot), expected);
+    }
 }

@@ -3,13 +3,15 @@
 use blake3::Hasher;
 use profiles::{
     apply_cbv_modifiers, apply_classification, apply_pev_modifiers, classify_signal_frame,
-    decide_with_fallback, ControlDecision, RegulationConfig,
+    decide_with_fallback, ControlDecision, OverlaySet, ProfileState, RegulationConfig,
 };
 use prost::Message;
 use pvgs_client::{PvgsReader, PvgsWriter};
 use rsv::RsvState;
 use std::path::PathBuf;
-use ucf::v1::{ActiveProfile, ControlFrame, Overlays, ToolClassMask};
+use ucf::v1::{
+    ActiveProfile, ControlFrame, IntegrityStateClass, LevelClass, Overlays, ToolClassMask,
+};
 
 const CONTROL_FRAME_DOMAIN: &str = "UCF:HASH:CONTROL_FRAME";
 
@@ -19,6 +21,24 @@ pub struct RegulationEngine {
     pvgs_reader: Option<Box<dyn PvgsReader + Send + Sync>>,
     pvgs_writer: Option<Box<dyn PvgsWriter + Send>>,
     session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegulationSnapshot {
+    pub profile: ProfileState,
+    pub overlays: OverlaySet,
+    pub deescalation_lock: bool,
+    pub control_frame_digest: Option<[u8; 32]>,
+    pub rsv_summary: RsvSummary,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RsvSummary {
+    pub integrity: IntegrityStateClass,
+    pub threat: LevelClass,
+    pub policy_pressure: LevelClass,
+    pub arousal: LevelClass,
+    pub stability: LevelClass,
 }
 
 impl Default for RegulationEngine {
@@ -69,6 +89,24 @@ impl RegulationEngine {
         self.session_id = Some(session_id.into());
     }
 
+    pub fn snapshot(&self) -> RegulationSnapshot {
+        let now_ms = self.rsv.last_seen_frame_ts_ms.unwrap_or(0);
+        let decision = decide_with_fallback(&self.rsv, now_ms, &self.config);
+        let (control_frame, _) = self.build_control_frame(decision.clone());
+        let digest = control_frame
+            .control_frame_digest
+            .as_ref()
+            .and_then(|bytes| bytes.as_slice().try_into().ok());
+
+        RegulationSnapshot {
+            profile: decision.profile,
+            overlays: decision.overlays,
+            deescalation_lock: decision.deescalation_lock,
+            control_frame_digest: digest,
+            rsv_summary: self.rsv_summary(),
+        }
+    }
+
     pub fn on_signal_frame(
         &mut self,
         mut frame: ucf::v1::SignalFrame,
@@ -93,7 +131,20 @@ impl RegulationEngine {
         self.render_control_frame(decision)
     }
 
-    fn render_control_frame(&mut self, mut decision: ControlDecision) -> ControlFrame {
+    fn render_control_frame(&mut self, decision: ControlDecision) -> ControlFrame {
+        let (control_frame, digest_bytes) = self.build_control_frame(decision);
+
+        if let Some(writer) = self.pvgs_writer.as_mut() {
+            let _ = writer.commit_control_frame_evidence(
+                self.session_id.as_deref().unwrap_or("default-session"),
+                digest_bytes,
+            );
+        }
+
+        control_frame
+    }
+
+    fn build_control_frame(&self, mut decision: ControlDecision) -> (ControlFrame, [u8; 32]) {
         let cbv_digest = self
             .pvgs_reader
             .as_ref()
@@ -168,14 +219,17 @@ impl RegulationEngine {
 
         control_frame.control_frame_digest = Some(digest_bytes.to_vec());
 
-        if let Some(writer) = self.pvgs_writer.as_mut() {
-            let _ = writer.commit_control_frame_evidence(
-                self.session_id.as_deref().unwrap_or("default-session"),
-                digest_bytes,
-            );
-        }
+        (control_frame, digest_bytes)
+    }
 
-        control_frame
+    fn rsv_summary(&self) -> RsvSummary {
+        RsvSummary {
+            integrity: self.rsv.integrity,
+            threat: self.rsv.threat,
+            policy_pressure: self.rsv.policy_pressure,
+            arousal: self.rsv.arousal,
+            stability: self.rsv.stability,
+        }
     }
 
     fn toolclass_mask_for(&self, decision: &ControlDecision) -> ToolClassMask {
