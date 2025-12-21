@@ -19,6 +19,7 @@ pub struct RsvState {
     pub last_seen_frame_ts_ms: Option<u64>,
     pub missing_frame_counter: u32,
     pub missing_data: bool,
+    pub forensic_latched: bool,
 }
 
 impl Default for RsvState {
@@ -38,7 +39,14 @@ impl Default for RsvState {
             last_seen_frame_ts_ms: None,
             missing_frame_counter: 0,
             missing_data: false,
+            forensic_latched: false,
         }
+    }
+}
+
+impl RsvState {
+    pub fn reset_forensic(&mut self) {
+        self.forensic_latched = false;
     }
 }
 

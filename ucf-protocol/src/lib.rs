@@ -64,6 +64,7 @@ pub mod v1 {
         RcCdDlpSecretPattern = 20,
         RcCdDlpObfuscation = 21,
         RcCdDlpStegano = 22,
+        RcRxActionForensic = 30,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]

@@ -12,7 +12,8 @@ use rsv::RsvState;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use ucf::v1::{
-    ActiveProfile, ControlFrame, IntegrityStateClass, LevelClass, Overlays, ToolClassMask,
+    ActiveProfile, ControlFrame, IntegrityStateClass, LevelClass, Overlays, ReasonCode,
+    ToolClassMask,
 };
 
 const CONTROL_FRAME_DOMAIN: &str = "UCF:HASH:CONTROL_FRAME";
@@ -129,6 +130,7 @@ impl RegulationEngine {
     pub fn snapshot(&mut self) -> RegulationSnapshot {
         let now_ms = self.rsv.last_seen_frame_ts_ms.unwrap_or(0);
         let decision = decide_with_fallback(&self.rsv, now_ms, &self.config);
+        let decision = self.apply_forensic_override(decision);
         let decision = self.apply_anti_flapping(decision, now_ms);
         let (control_frame, _) = self.build_control_frame(decision.clone());
         let digest = control_frame
@@ -197,6 +199,12 @@ impl RegulationEngine {
         self.apply_and_render(decision, now_ms)
     }
 
+    pub fn reset_forensic(&mut self) {
+        self.rsv.reset_forensic();
+        self.anti_flapping_state.current_profile = None;
+        self.anti_flapping_state.current_overlays = None;
+    }
+
     fn decide_from_frame(
         &mut self,
         mut frame: ucf::v1::SignalFrame,
@@ -219,8 +227,43 @@ impl RegulationEngine {
     }
 
     fn apply_and_render(&mut self, decision: ControlDecision, now_ms: u64) -> ControlFrame {
+        let decision = self.apply_forensic_override(decision);
         let decision = self.apply_anti_flapping(decision, now_ms);
         self.render_control_frame(decision)
+    }
+
+    fn apply_forensic_override(&mut self, mut decision: ControlDecision) -> ControlDecision {
+        let integrity_fail = self.rsv.integrity == IntegrityStateClass::Fail;
+        if integrity_fail {
+            self.rsv.forensic_latched = true;
+        }
+
+        if self.rsv.forensic_latched {
+            decision.profile = ProfileState::M3Forensic;
+            decision.overlays = OverlaySet::all_enabled();
+            decision.deescalation_lock = true;
+            decision.cooldown_class = LevelClass::High;
+
+            if !decision
+                .profile_reason_codes
+                .contains(&ReasonCode::ReIntegrityFail)
+            {
+                decision
+                    .profile_reason_codes
+                    .push(ReasonCode::ReIntegrityFail);
+            }
+
+            if !decision
+                .profile_reason_codes
+                .contains(&ReasonCode::RcRxActionForensic)
+            {
+                decision
+                    .profile_reason_codes
+                    .push(ReasonCode::RcRxActionForensic);
+            }
+        }
+
+        decision
     }
 
     fn apply_anti_flapping(
@@ -496,6 +539,16 @@ impl RegulationEngine {
     }
 
     fn toolclass_mask_for(&self, decision: &ControlDecision) -> ToolClassMask {
+        if self.rsv.forensic_latched {
+            return ToolClassMask {
+                read: true,
+                write: false,
+                execute: false,
+                transform: true,
+                export: false,
+            };
+        }
+
         let mut mask_cfg = self
             .config
             .profiles
@@ -882,12 +935,60 @@ mod tests {
 
         let mask = control.toolclass_mask.unwrap();
         assert!(!mask.export && !mask.write && !mask.execute);
+        assert!(mask.read && mask.transform);
         assert_eq!(control.active_profile.unwrap().profile, "M3_FORENSIC");
         let overlays = control.overlays.unwrap();
         assert!(overlays.simulate_first);
         assert!(overlays.export_lock);
         assert!(overlays.novelty_lock);
         assert!(overlays.chain_tightening);
+        assert_eq!(
+            control.profile_reason_codes,
+            vec![
+                ReasonCode::ReIntegrityFail as i32,
+                ReasonCode::RcRxActionForensic as i32
+            ]
+        );
+        assert_eq!(control.deescalation_lock, Some(true));
+        assert_eq!(control.cooldown_class, Some(LevelClass::High as i32));
+    }
+
+    #[test]
+    fn integrity_fail_latches_until_reset() {
+        let mut engine = RegulationEngine::default();
+        let mut frame = base_frame();
+        frame.integrity_state = IntegrityStateClass::Fail as i32;
+        let _ = engine.on_signal_frame(frame, 1);
+
+        let mut ok_frame = base_frame();
+        ok_frame.integrity_state = IntegrityStateClass::Ok as i32;
+        let control = engine.on_signal_frame(ok_frame, 2);
+        assert_eq!(control.active_profile.unwrap().profile, "M3_FORENSIC");
+
+        engine.reset_forensic();
+
+        let control_after_reset = engine.on_signal_frame(base_frame(), 3);
+        assert_ne!(
+            control_after_reset.active_profile.unwrap().profile,
+            "M3_FORENSIC"
+        );
+    }
+
+    #[test]
+    fn forensic_override_is_deterministic() {
+        let mut frame = base_frame();
+        frame.integrity_state = IntegrityStateClass::Fail as i32;
+
+        let mut engine_a = RegulationEngine::default();
+        let mut engine_b = RegulationEngine::default();
+
+        let control_a = engine_a.on_signal_frame(frame.clone(), 1);
+        let control_b = engine_b.on_signal_frame(frame, 1);
+
+        assert_eq!(
+            control_a.control_frame_digest,
+            control_b.control_frame_digest
+        );
     }
 
     #[test]
