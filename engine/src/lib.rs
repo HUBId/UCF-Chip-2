@@ -217,6 +217,7 @@ impl RegulationEngine {
         let timestamp_ms = frame.timestamp_ms.unwrap_or(now_ms);
         let classified = classify_signal_frame(&frame, &self.config.thresholds);
         apply_classification(&mut self.rsv, &classified, timestamp_ms);
+        self.rsv.update_unlock_state(&frame);
 
         decide_with_fallback(&self.rsv, now_ms, &self.config)
     }
@@ -239,12 +240,48 @@ impl RegulationEngine {
         }
 
         if self.rsv.forensic_latched {
-            decision.profile = ProfileState::M3Forensic;
+            let unlock_ready = self.rsv.unlock_ready;
+            decision.profile = if unlock_ready {
+                ProfileState::M1Restricted
+            } else {
+                ProfileState::M3Forensic
+            };
             decision.overlays = OverlaySet::all_enabled();
             decision.deescalation_lock = true;
             decision.cooldown_class = LevelClass::High;
 
-            if !decision
+            if unlock_ready {
+                decision
+                    .profile_reason_codes
+                    .retain(|code| *code != ReasonCode::ReIntegrityFail);
+
+                if !decision
+                    .profile_reason_codes
+                    .contains(&ReasonCode::ReIntegrityDegraded)
+                {
+                    decision
+                        .profile_reason_codes
+                        .push(ReasonCode::ReIntegrityDegraded);
+                }
+
+                if !decision
+                    .profile_reason_codes
+                    .contains(&ReasonCode::RcGvRecoveryUnlockGranted)
+                {
+                    decision
+                        .profile_reason_codes
+                        .push(ReasonCode::RcGvRecoveryUnlockGranted);
+                }
+
+                if !decision
+                    .profile_reason_codes
+                    .contains(&ReasonCode::RcRgProfileM1Restricted)
+                {
+                    decision
+                        .profile_reason_codes
+                        .push(ReasonCode::RcRgProfileM1Restricted);
+                }
+            } else if !decision
                 .profile_reason_codes
                 .contains(&ReasonCode::ReIntegrityFail)
             {
@@ -285,10 +322,15 @@ impl RegulationEngine {
             self.anti_flapping_state.current_profile = Some(decision.profile);
             self.anti_flapping_state.last_profile_change_ms = Some(now_ms);
         } else if decision.profile != current_profile {
+            let unlock_deescalation = self.rsv.forensic_latched && self.rsv.unlock_ready;
             let tightening = Self::is_tightening(decision.profile, current_profile);
             let within_cooldown = self.within_profile_cooldown(now_ms);
 
-            if !tightening && within_cooldown {
+            if unlock_deescalation {
+                profile_changed = true;
+                self.anti_flapping_state.current_profile = Some(decision.profile);
+                self.anti_flapping_state.last_profile_change_ms = Some(now_ms);
+            } else if !tightening && within_cooldown {
                 decision.profile = current_profile;
             } else {
                 profile_changed = true;
@@ -635,6 +677,23 @@ mod tests {
         }
     }
 
+    fn medium_unlock_frame(
+        ts: u64,
+        integrity: IntegrityStateClass,
+        mut reason_codes: Vec<i32>,
+    ) -> SignalFrame {
+        reason_codes.push(ReasonCode::RcGvRecoveryUnlockGranted as i32);
+
+        SignalFrame {
+            window_kind: WindowKind::Medium as i32,
+            window_index: Some(ts),
+            timestamp_ms: Some(ts),
+            integrity_state: integrity as i32,
+            reason_codes,
+            ..base_frame()
+        }
+    }
+
     fn replay_mismatch_frame(ts: u64) -> SignalFrame {
         let mut frame = base_frame();
         frame.timestamp_ms = Some(ts);
@@ -951,6 +1010,83 @@ mod tests {
         );
         assert_eq!(control.deescalation_lock, Some(true));
         assert_eq!(control.cooldown_class, Some(LevelClass::High as i32));
+    }
+
+    #[test]
+    fn integrity_fail_without_unlock_remains_forensic() {
+        let mut engine = RegulationEngine::default();
+        let mut frame = base_frame();
+        frame.window_kind = WindowKind::Medium as i32;
+        frame.integrity_state = IntegrityStateClass::Fail as i32;
+        frame.reason_codes = vec![ReasonCode::ReIntegrityFail as i32];
+
+        let control_first = engine.on_signal_frame(frame.clone(), 1);
+        assert_eq!(control_first.active_profile.unwrap().profile, "M3_FORENSIC");
+
+        let control_second = engine.on_signal_frame(frame, 2);
+        assert_eq!(
+            control_second.active_profile.unwrap().profile,
+            "M3_FORENSIC"
+        );
+    }
+
+    #[test]
+    fn single_unlock_window_keeps_forensic_profile() {
+        let mut engine = RegulationEngine::default();
+        let frame = medium_unlock_frame(
+            1,
+            IntegrityStateClass::Fail,
+            vec![ReasonCode::ReIntegrityFail as i32],
+        );
+
+        let control = engine.on_signal_frame(frame, 1);
+        assert_eq!(control.active_profile.unwrap().profile, "M3_FORENSIC");
+    }
+
+    #[test]
+    fn stable_unlock_windows_allow_restricted_recovery() {
+        let mut engine = RegulationEngine::default();
+        let first = medium_unlock_frame(
+            1,
+            IntegrityStateClass::Fail,
+            vec![ReasonCode::ReIntegrityFail as i32],
+        );
+        let _ = engine.on_signal_frame(first, 1);
+
+        let second = medium_unlock_frame(
+            2,
+            IntegrityStateClass::Degraded,
+            vec![ReasonCode::ReIntegrityDegraded as i32],
+        );
+        let control = engine.on_signal_frame(second, 2);
+
+        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
+        let overlays = control.overlays.unwrap();
+        assert!(overlays.simulate_first);
+        assert!(overlays.export_lock);
+        assert!(overlays.novelty_lock);
+        assert!(overlays.chain_tightening);
+
+        let mask = control.toolclass_mask.unwrap();
+        assert!(mask.read && mask.transform);
+        assert!(!mask.export && !mask.write && !mask.execute);
+
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcGvRecoveryUnlockGranted as i32)));
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcRgProfileM1Restricted as i32)));
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::ReIntegrityDegraded as i32)));
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcRxActionForensic as i32)));
+        assert!(!control
+            .profile_reason_codes
+            .contains(&(ReasonCode::ReIntegrityFail as i32)));
+        assert_eq!(control.deescalation_lock, Some(true));
     }
 
     #[test]

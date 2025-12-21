@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use serde::{Deserialize, Serialize};
-use ucf::v1::{IntegrityStateClass, LevelClass};
+use ucf::v1::{IntegrityStateClass, LevelClass, ReasonCode, SignalFrame, WindowKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RsvState {
@@ -20,6 +20,9 @@ pub struct RsvState {
     pub missing_frame_counter: u32,
     pub missing_data: bool,
     pub forensic_latched: bool,
+    pub unlock_seen: bool,
+    pub unlock_stable_windows: u32,
+    pub unlock_ready: bool,
 }
 
 impl Default for RsvState {
@@ -40,6 +43,9 @@ impl Default for RsvState {
             missing_frame_counter: 0,
             missing_data: false,
             forensic_latched: false,
+            unlock_seen: false,
+            unlock_stable_windows: 0,
+            unlock_ready: false,
         }
     }
 }
@@ -47,7 +53,105 @@ impl Default for RsvState {
 impl RsvState {
     pub fn reset_forensic(&mut self) {
         self.forensic_latched = false;
+        self.unlock_seen = false;
+        self.unlock_stable_windows = 0;
+        self.unlock_ready = false;
     }
+
+    pub fn update_unlock_state(&mut self, frame: &SignalFrame) {
+        let window_kind = WindowKind::try_from(frame.window_kind).unwrap_or(WindowKind::Unknown);
+        if window_kind != WindowKind::Medium {
+            return;
+        }
+
+        let unlock_present = frame_contains_reason(frame, ReasonCode::RcGvRecoveryUnlockGranted);
+        self.unlock_seen |= unlock_present;
+
+        if !self.unlock_seen {
+            self.unlock_ready = false;
+            self.unlock_stable_windows = 0;
+            return;
+        }
+
+        let integrity_state = IntegrityStateClass::try_from(frame.integrity_state)
+            .unwrap_or(IntegrityStateClass::Degraded);
+
+        if !unlock_present {
+            self.unlock_stable_windows = 0;
+            self.unlock_ready = false;
+            return;
+        }
+
+        let critical_present = frame_has_critical_reason(frame, unlock_present);
+
+        if integrity_state == IntegrityStateClass::Fail {
+            if critical_present {
+                self.unlock_stable_windows = 0;
+                self.unlock_ready = false;
+                return;
+            }
+            self.unlock_stable_windows = self.unlock_stable_windows.saturating_add(1);
+        } else {
+            self.unlock_stable_windows = self.unlock_stable_windows.saturating_add(1);
+        }
+
+        self.unlock_ready = self.unlock_stable_windows >= 2;
+    }
+}
+
+fn frame_contains_reason(frame: &SignalFrame, code: ReasonCode) -> bool {
+    let code = code as i32;
+    frame.reason_codes.contains(&code)
+        || frame.top_reason_codes.contains(&code)
+        || frame
+            .policy_stats
+            .as_ref()
+            .map(|stats| stats.top_reason_codes.contains(&code))
+            .unwrap_or(false)
+        || frame
+            .exec_stats
+            .as_ref()
+            .map(|stats| stats.top_reason_codes.contains(&code))
+            .unwrap_or(false)
+}
+
+fn frame_has_critical_reason(frame: &SignalFrame, unlock_present: bool) -> bool {
+    let mut critical = false;
+    for code in frame
+        .top_reason_codes
+        .iter()
+        .chain(frame.reason_codes.iter())
+        .chain(
+            frame
+                .policy_stats
+                .as_ref()
+                .map(|stats| stats.top_reason_codes.as_slice())
+                .unwrap_or_default()
+                .iter(),
+        )
+        .chain(
+            frame
+                .exec_stats
+                .as_ref()
+                .map(|stats| stats.top_reason_codes.as_slice())
+                .unwrap_or_default()
+                .iter(),
+        )
+    {
+        if let Ok(reason) = ReasonCode::try_from(*code) {
+            if reason == ReasonCode::ReIntegrityFail && !unlock_present {
+                critical = true;
+                break;
+            }
+
+            if format!("{:?}", reason).starts_with("RcRxCt") {
+                critical = true;
+                break;
+            }
+        }
+    }
+
+    critical
 }
 
 #[cfg(test)]
@@ -68,6 +172,9 @@ mod tests {
         assert_eq!(state.receipt_invalid_count_window, 0);
         assert_eq!(state.missing_frame_counter, 0);
         assert!(!state.missing_data);
+        assert!(!state.unlock_seen);
+        assert_eq!(state.unlock_stable_windows, 0);
+        assert!(!state.unlock_ready);
     }
 
     #[test]

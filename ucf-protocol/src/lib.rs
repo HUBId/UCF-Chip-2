@@ -65,6 +65,8 @@ pub mod v1 {
         RcCdDlpObfuscation = 21,
         RcCdDlpStegano = 22,
         RcRxActionForensic = 30,
+        RcGvRecoveryUnlockGranted = 31,
+        RcRgProfileM1Restricted = 32,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
