@@ -200,7 +200,8 @@ mod tests {
         assert!(output
             .reason_codes
             .codes
-            .contains(&"RC.GV.TOOL.SUSPEND_RECOMMENDED".to_string()));
+            .iter()
+            .any(|code| code == "RC.GV.TOOL.SUSPEND_RECOMMENDED"));
     }
 
     #[test]
@@ -219,6 +220,6 @@ mod tests {
         assert_eq!(cerebellum.anomaly_counter_per_tool.len(), 32);
         assert!(!cerebellum
             .anomaly_counter_per_tool
-            .contains_key(&"tool-31".to_string()));
+            .contains_key("tool-31"));
     }
 }
