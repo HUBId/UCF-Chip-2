@@ -191,6 +191,28 @@ pub struct RsvSnapshot {
     pub dominant_reason_codes: ReasonSet,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BaselineVector {
+    pub caution_floor: LevelClass,
+    pub novelty_dampening: LevelClass,
+    pub approval_strictness: LevelClass,
+    pub export_strictness: LevelClass,
+    pub chain_conservatism: LevelClass,
+    pub cooldown_bias: CooldownClass,
+    pub reward_block_bias: LevelClass,
+    pub reason_codes: ReasonSet,
+}
+
+impl BaselineVector {
+    pub fn add_reason_code(&mut self, code: impl Into<String>) {
+        self.reason_codes.insert(code);
+    }
+
+    pub fn extend_reason_codes<I: IntoIterator<Item = String>>(&mut self, iter: I) {
+        self.reason_codes.extend(iter);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmotionField {
     pub noise: NoiseClass,
@@ -280,5 +302,42 @@ pub trait DbmComponent {
 
     fn integrity(&self) -> IntegrityState {
         IntegrityState::Ok
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn baseline_vector_normalizes_reason_codes() {
+        let mut baseline = BaselineVector::default();
+
+        baseline.add_reason_code("b");
+        baseline.add_reason_code("a");
+        baseline.add_reason_code("a");
+        baseline.extend_reason_codes(
+            ["c", "d", "e", "f", "g", "h", "i", "j"]
+                .into_iter()
+                .map(String::from),
+        );
+
+        assert_eq!(
+            baseline.reason_codes.codes.len(),
+            ReasonSet::DEFAULT_MAX_LEN
+        );
+        assert_eq!(
+            baseline.reason_codes.codes,
+            vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+                "d".to_string(),
+                "e".to_string(),
+                "f".to_string(),
+                "g".to_string(),
+                "h".to_string(),
+            ]
+        );
     }
 }
