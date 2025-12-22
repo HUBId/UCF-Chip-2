@@ -309,6 +309,19 @@ pub fn apply_classification(rsv: &mut RsvState, classified: &ClassifiedSignals, 
     rsv.receipt_missing_count_window = classified.receipt_missing_count;
     rsv.receipt_invalid_count_window = classified.receipt_invalid_count;
     rsv.missing_data = classified.missing_data;
+    rsv.divergence = derive_divergence(classified);
+}
+
+fn derive_divergence(classified: &ClassifiedSignals) -> LevelClass {
+    if classified.missing_data {
+        return LevelClass::High;
+    }
+
+    match classified.exec_timeout_count {
+        count if count >= 3 => LevelClass::High,
+        1..=2 => LevelClass::Med,
+        _ => LevelClass::Low,
+    }
 }
 
 #[cfg(test)]
@@ -619,5 +632,27 @@ mod tests {
         assert!(decision.overlays.export_lock);
         assert!(decision.overlays.novelty_lock);
         assert_eq!(decision.profile_reason_codes, base.profile_reason_codes);
+    }
+
+    #[test]
+    fn divergence_tracks_timeouts_and_missing_data() {
+        let mut rsv = RsvState::default();
+        let mut classified = ClassifiedSignals::conservative(WindowKind::Short);
+        classified.exec_timeout_count = 0;
+        classified.missing_data = false;
+        apply_classification(&mut rsv, &classified, 1);
+        assert_eq!(rsv.divergence, LevelClass::Low);
+
+        classified.exec_timeout_count = 1;
+        apply_classification(&mut rsv, &classified, 2);
+        assert_eq!(rsv.divergence, LevelClass::Med);
+
+        classified.exec_timeout_count = 4;
+        apply_classification(&mut rsv, &classified, 3);
+        assert_eq!(rsv.divergence, LevelClass::High);
+
+        classified.missing_data = true;
+        apply_classification(&mut rsv, &classified, 4);
+        assert_eq!(rsv.divergence, LevelClass::High);
     }
 }
