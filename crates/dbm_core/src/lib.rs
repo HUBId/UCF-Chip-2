@@ -89,6 +89,7 @@ pub enum SalienceSource {
     ExecReliability,
     Recovery,
     Replay,
+    Progress,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

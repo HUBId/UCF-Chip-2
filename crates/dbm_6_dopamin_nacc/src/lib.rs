@@ -17,10 +17,17 @@ pub struct DopaInput {
     pub macro_finalized_count_long: u32,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DopaState {
+    pub utility_score: i32,
+    pub non_positive_streak: u32,
+    pub reward_block: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DopaOutput {
     pub progress: LevelClass,
-    pub incentive_focus_hint: LevelClass,
+    pub incentive_focus: LevelClass,
     pub replay_hint: bool,
     pub reward_block: bool,
     pub reason_codes: ReasonSet,
@@ -30,7 +37,7 @@ impl Default for DopaOutput {
     fn default() -> Self {
         Self {
             progress: LevelClass::Low,
-            incentive_focus_hint: LevelClass::Low,
+            incentive_focus: LevelClass::Low,
             replay_hint: false,
             reward_block: false,
             reason_codes: ReasonSet::default(),
@@ -40,11 +47,7 @@ impl Default for DopaOutput {
 
 #[derive(Debug, Default)]
 pub struct DopaminNacc {
-    progress_current: LevelClass,
-    utility_score: i32,
-    trend_counter: u32,
-    diminishing_returns_counter: u32,
-    reward_block: bool,
+    state: DopaState,
 }
 
 impl DopaminNacc {
@@ -60,15 +63,16 @@ impl DopaminNacc {
     }
 
     fn compute_delta(input: &DopaInput) -> i32 {
-        let mut delta =
-            input.exec_success_count_medium as i32 - input.exec_failure_count_medium as i32;
-        delta -= (input.deny_count_medium as i32) / 5;
+        let budget_penalty = match input.budget_stress {
+            LevelClass::Low => 0,
+            LevelClass::Med => 1,
+            LevelClass::High => 2,
+        };
 
-        if input.budget_stress == LevelClass::High {
-            delta -= 2;
-        }
-
-        delta
+        input.exec_success_count_medium as i32
+            - input.exec_failure_count_medium as i32
+            - (input.deny_count_medium as i32) / 5
+            - budget_penalty
     }
 
     fn reward_block(input: &DopaInput) -> bool {
@@ -80,14 +84,8 @@ impl DopaminNacc {
             || input.replay_mismatch_present
     }
 
-    fn map_progress(utility_score: i32, reward_block: bool) -> LevelClass {
-        if reward_block {
-            if utility_score >= 1 {
-                LevelClass::Med
-            } else {
-                LevelClass::Low
-            }
-        } else if utility_score >= 5 {
+    fn map_progress(utility_score: i32) -> LevelClass {
+        if utility_score >= 5 {
             LevelClass::High
         } else if utility_score >= 1 {
             LevelClass::Med
@@ -96,11 +94,11 @@ impl DopaminNacc {
         }
     }
 
-    fn incentive_hint(progress: LevelClass, reward_block: bool) -> LevelClass {
-        match (progress, reward_block) {
-            (LevelClass::High, false) => LevelClass::High,
-            (LevelClass::Med, false) => LevelClass::Med,
-            _ => LevelClass::Low,
+    fn incentive_focus(progress: LevelClass, reward_block: bool) -> LevelClass {
+        if reward_block {
+            LevelClass::Low
+        } else {
+            progress
         }
     }
 }
@@ -112,39 +110,37 @@ impl DbmModule for DopaminNacc {
     fn tick(&mut self, input: &Self::Input) -> Self::Output {
         let mut reason_codes = ReasonSet::default();
 
-        self.reward_block = Self::reward_block(input);
-        if self.reward_block {
+        self.state.reward_block = Self::reward_block(input);
+        if self.state.reward_block {
             reason_codes.insert("RC.GV.PROGRESS.REWARD_BLOCKED");
         }
 
         let delta = Self::compute_delta(input);
         if delta > 0 {
-            self.trend_counter = self.trend_counter.saturating_add(1);
-            self.diminishing_returns_counter = 0;
+            self.state.non_positive_streak = 0;
         } else {
-            self.trend_counter = 0;
-            self.diminishing_returns_counter = self.diminishing_returns_counter.saturating_add(1);
+            self.state.non_positive_streak = self.state.non_positive_streak.saturating_add(1);
         }
 
-        self.utility_score = Self::clamp_utility(self.utility_score + delta);
-        let mut progress = Self::map_progress(self.utility_score, self.reward_block);
-        if self.reward_block && progress == LevelClass::High {
+        self.state.utility_score = Self::clamp_utility(self.state.utility_score + delta);
+
+        let mut progress = Self::map_progress(self.state.utility_score);
+        if self.state.reward_block && progress == LevelClass::High {
             progress = LevelClass::Med;
         }
-        self.progress_current = progress;
 
-        let replay_hint = self.diminishing_returns_counter >= 3;
+        let replay_hint = self.state.non_positive_streak >= 3;
         if replay_hint {
             reason_codes.insert("RC.GV.REPLAY.DIMINISHING_RETURNS");
         }
 
-        let incentive_focus_hint = Self::incentive_hint(progress, self.reward_block);
+        let incentive_focus = Self::incentive_focus(progress, self.state.reward_block);
 
         DopaOutput {
             progress,
-            incentive_focus_hint,
+            incentive_focus,
             replay_hint,
-            reward_block: self.reward_block,
+            reward_block: self.state.reward_block,
             reason_codes,
         }
     }
@@ -170,7 +166,7 @@ mod tests {
         });
 
         assert_eq!(output.progress, LevelClass::Med);
-        assert_eq!(output.incentive_focus_hint, LevelClass::Low);
+        assert_eq!(output.incentive_focus, LevelClass::Low);
         assert!(output
             .reason_codes
             .codes
@@ -191,7 +187,7 @@ mod tests {
             ..base_input()
         });
 
-        assert_eq!(module.utility_score, 5);
+        assert_eq!(module.state.utility_score, 5);
         assert_eq!(output.progress, LevelClass::High);
     }
 
@@ -215,6 +211,20 @@ mod tests {
             .reason_codes
             .codes
             .contains(&"RC.GV.REPLAY.DIMINISHING_RETURNS".to_string()));
+    }
+
+    #[test]
+    fn reason_codes_ordering_is_deterministic() {
+        let mut module = DopaminNacc::new();
+        let output = module.tick(&DopaInput {
+            threat: LevelClass::High,
+            replay_mismatch_present: true,
+            ..base_input()
+        });
+
+        let mut sorted = output.reason_codes.codes.clone();
+        sorted.sort();
+        assert_eq!(sorted, output.reason_codes.codes);
     }
 
     #[test]

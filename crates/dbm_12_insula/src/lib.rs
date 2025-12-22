@@ -13,6 +13,7 @@ pub struct InsulaInput {
     pub cbv_present: bool,
     pub pev_present: bool,
     pub hbv_present: bool,
+    pub progress: LevelClass,
     pub dominant_reason_codes: Vec<String>,
 }
 
@@ -28,6 +29,7 @@ impl Default for InsulaInput {
             cbv_present: false,
             pev_present: false,
             hbv_present: false,
+            progress: LevelClass::Low,
             dominant_reason_codes: Vec::new(),
         }
     }
@@ -50,6 +52,7 @@ impl DbmModule for Insula {
         let mut snapshot = IsvSnapshot {
             integrity: input.integrity,
             policy_pressure: input.policy_pressure,
+            progress: input.progress,
             ..IsvSnapshot::default()
         };
 
@@ -149,5 +152,17 @@ mod tests {
 
         let snapshot = module.tick(&input);
         assert_eq!(snapshot.stability, LevelClass::High);
+    }
+
+    #[test]
+    fn progress_is_passthrough_from_dopamin() {
+        let mut module = Insula::new();
+        let input = InsulaInput {
+            progress: LevelClass::High,
+            ..Default::default()
+        };
+
+        let snapshot = module.tick(&input);
+        assert_eq!(snapshot.progress, LevelClass::High);
     }
 }

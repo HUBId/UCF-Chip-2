@@ -10,6 +10,8 @@ pub struct SnInput {
     pub isv: IsvSnapshot,
     pub cooldown_class: Option<LevelClass>,
     pub current_dwm: Option<DwmMode>,
+    pub replay_hint: bool,
+    pub reward_block: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,16 +39,20 @@ impl SubstantiaNigra {
         Self {}
     }
 
-    fn suggested_mode(isv: &IsvSnapshot) -> DwmMode {
-        if isv.integrity == IntegrityState::Fail {
+    fn suggested_mode(input: &SnInput) -> DwmMode {
+        if input.isv.integrity == IntegrityState::Fail {
             return DwmMode::Report;
         }
 
-        if isv.threat == LevelClass::High {
+        if input.isv.threat == LevelClass::High {
             return DwmMode::Stabilize;
         }
 
-        if isv.policy_pressure == LevelClass::High || isv.arousal == LevelClass::High {
+        if input.isv.policy_pressure == LevelClass::High || input.isv.arousal == LevelClass::High {
+            return DwmMode::Simulate;
+        }
+
+        if input.replay_hint {
             return DwmMode::Simulate;
         }
 
@@ -73,35 +79,35 @@ impl SubstantiaNigra {
         }
     }
 
-    fn build_salience(isv: &IsvSnapshot) -> Vec<SalienceItem> {
+    fn build_salience(input: &SnInput) -> Vec<SalienceItem> {
         let mut items = Vec::new();
 
-        if isv.integrity == IntegrityState::Fail {
+        if input.isv.integrity == IntegrityState::Fail {
             items.push(SalienceItem::new(
                 SalienceSource::Integrity,
                 LevelClass::High,
-                isv.dominant_reason_codes.codes.clone(),
+                input.isv.dominant_reason_codes.codes.clone(),
             ));
         }
 
-        if isv.threat == LevelClass::High {
+        if input.isv.threat == LevelClass::High {
             items.push(SalienceItem::new(
                 SalienceSource::Threat,
                 LevelClass::High,
-                isv.dominant_reason_codes.codes.clone(),
+                input.isv.dominant_reason_codes.codes.clone(),
             ));
         }
 
-        if isv.policy_pressure == LevelClass::High {
+        if input.isv.policy_pressure == LevelClass::High {
             items.push(SalienceItem::new(
                 SalienceSource::PolicyPressure,
                 LevelClass::High,
-                isv.dominant_reason_codes.codes.clone(),
+                input.isv.dominant_reason_codes.codes.clone(),
             ));
         }
 
-        if isv.replay_hint {
-            let intensity = if isv.progress == LevelClass::High {
+        if input.replay_hint {
+            let intensity = if input.isv.progress == LevelClass::High {
                 LevelClass::High
             } else {
                 LevelClass::Med
@@ -110,11 +116,28 @@ impl SubstantiaNigra {
             items.push(SalienceItem::new(
                 SalienceSource::Replay,
                 intensity,
-                isv.dominant_reason_codes.codes.clone(),
+                input.isv.dominant_reason_codes.codes.clone(),
             ));
         }
 
-        let receipt_rcs: Vec<String> = isv
+        if input.isv.progress == LevelClass::High && !input.reward_block {
+            items.push(SalienceItem::new(
+                SalienceSource::Progress,
+                LevelClass::Med,
+                input.isv.dominant_reason_codes.codes.clone(),
+            ));
+        }
+
+        if input.reward_block {
+            items.push(SalienceItem::new(
+                SalienceSource::Integrity,
+                LevelClass::Med,
+                input.isv.dominant_reason_codes.codes.clone(),
+            ));
+        }
+
+        let receipt_rcs: Vec<String> = input
+            .isv
             .dominant_reason_codes
             .codes
             .iter()
@@ -167,7 +190,7 @@ impl DbmModule for SubstantiaNigra {
     type Output = SnOutput;
 
     fn tick(&mut self, input: &Self::Input) -> Self::Output {
-        let suggested = Self::suggested_mode(&input.isv);
+        let suggested = Self::suggested_mode(input);
         let dwm = Self::apply_hysteresis(input.current_dwm, suggested);
 
         let mut reason_codes = ReasonSet::default();
@@ -178,7 +201,7 @@ impl DbmModule for SubstantiaNigra {
             DwmMode::ExecPlan => "RC.GV.DWM.EXEC_PLAN",
         });
 
-        let salience_items = Self::build_salience(&input.isv);
+        let salience_items = Self::build_salience(input);
 
         SnOutput {
             dwm,
@@ -305,6 +328,30 @@ mod tests {
         {
             assert!(receipt_item.rcs.len() <= SalienceItem::MAX_RCS);
         }
+    }
+
+    #[test]
+    fn replay_hint_and_progress_generate_salience() {
+        let mut sn = SubstantiaNigra::new();
+        let isv = IsvSnapshot {
+            progress: LevelClass::High,
+            ..base_isv()
+        };
+
+        let output = sn.tick(&SnInput {
+            isv,
+            replay_hint: true,
+            ..Default::default()
+        });
+
+        assert!(output
+            .salience_items
+            .iter()
+            .any(|item| item.source == SalienceSource::Replay));
+        assert!(output
+            .salience_items
+            .iter()
+            .any(|item| item.source == SalienceSource::Progress));
     }
 
     #[test]

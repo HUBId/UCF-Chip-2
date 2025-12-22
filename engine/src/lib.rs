@@ -89,6 +89,8 @@ struct RunSnContext {
     integrity: IntegrityState,
     now_ms: u64,
     hbv: HpaOutput,
+    replay_hint: bool,
+    reward_block: bool,
 }
 
 pub struct RegulationEngine {
@@ -460,6 +462,20 @@ impl RegulationEngine {
             stability: ser_output.stability,
         });
 
+        let mut dopa_output = self.last_dopa_output.clone().unwrap_or_default();
+        if classified.window_kind == ucf::v1::WindowKind::Medium {
+            if let Some(input) = build_dopa_input(
+                &frame,
+                &classified,
+                &amy_output,
+                &self.counters,
+                to_brain_level(self.rsv.budget_stress),
+            ) {
+                dopa_output = self.dopamin.tick(&input);
+                self.last_dopa_output = Some(dopa_output.clone());
+            }
+        }
+
         let cbv_present = self
             .pvgs_reader
             .as_ref()
@@ -471,7 +487,13 @@ impl RegulationEngine {
             .and_then(|reader| reader.get_latest_pev_digest())
             .is_some();
 
-        let insula_input = build_insula_input(&frame, &classified, cbv_present, pev_present);
+        let insula_input = build_insula_input(
+            &frame,
+            &classified,
+            cbv_present,
+            pev_present,
+            dopa_output.progress,
+        );
         let mut isv = self.insula.tick(&insula_input);
         isv.threat = level_max(isv.threat, amy_output.threat);
         isv.threat_vectors = Some(amy_output.vectors.clone());
@@ -481,23 +503,6 @@ impl RegulationEngine {
             .extend(pag_output.reason_codes.codes.clone());
         isv.arousal = level_max(isv.arousal, lc_output.arousal);
         isv.stability = level_max(isv.stability, ser_output.stability);
-
-        let mut dopa_output = self.last_dopa_output.clone().unwrap_or_default();
-        if classified.window_kind == ucf::v1::WindowKind::Medium {
-            if let Some(input) = build_dopa_input(
-                &frame,
-                &classified,
-                &amy_output,
-                &isv,
-                &self.counters,
-                to_brain_level(self.rsv.budget_stress),
-            ) {
-                dopa_output = self.dopamin.tick(&input);
-                self.last_dopa_output = Some(dopa_output.clone());
-            }
-        }
-
-        isv.progress = dopa_output.progress;
         isv.replay_hint = dopa_output.replay_hint;
         isv.dominant_reason_codes
             .extend(dopa_output.reason_codes.codes.clone());
@@ -530,6 +535,8 @@ impl RegulationEngine {
                 integrity: to_brain_integrity(classified.integrity_state),
                 now_ms: timestamp_ms,
                 hbv: hbv_output.clone(),
+                replay_hint: dopa_output.replay_hint,
+                reward_block: dopa_output.reward_block,
             });
         merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
         hypo_decision
@@ -629,7 +636,22 @@ impl RegulationEngine {
             stability: ser_output.stability,
         });
 
-        let insula_input = build_insula_input(&frame, &classified, false, false);
+        let mut dopa_output = self.last_dopa_output.clone().unwrap_or_default();
+        if classified.window_kind == ucf::v1::WindowKind::Medium {
+            if let Some(input) = build_dopa_input(
+                &frame,
+                &classified,
+                &amy_output,
+                &self.counters,
+                to_brain_level(self.rsv.budget_stress),
+            ) {
+                dopa_output = self.dopamin.tick(&input);
+                self.last_dopa_output = Some(dopa_output.clone());
+            }
+        }
+
+        let insula_input =
+            build_insula_input(&frame, &classified, false, false, dopa_output.progress);
         let mut isv = self.insula.tick(&insula_input);
         isv.threat = level_max(isv.threat, amy_output.threat);
         isv.threat_vectors = Some(amy_output.vectors.clone());
@@ -639,23 +661,6 @@ impl RegulationEngine {
             .extend(pag_output.reason_codes.codes.clone());
         isv.arousal = level_max(isv.arousal, lc_output.arousal);
         isv.stability = level_max(isv.stability, ser_output.stability);
-
-        let mut dopa_output = self.last_dopa_output.clone().unwrap_or_default();
-        if classified.window_kind == ucf::v1::WindowKind::Medium {
-            if let Some(input) = build_dopa_input(
-                &frame,
-                &classified,
-                &amy_output,
-                &isv,
-                &self.counters,
-                to_brain_level(self.rsv.budget_stress),
-            ) {
-                dopa_output = self.dopamin.tick(&input);
-                self.last_dopa_output = Some(dopa_output.clone());
-            }
-        }
-
-        isv.progress = dopa_output.progress;
         isv.replay_hint = dopa_output.replay_hint;
         isv.dominant_reason_codes
             .extend(dopa_output.reason_codes.codes.clone());
@@ -689,6 +694,8 @@ impl RegulationEngine {
                 integrity: to_brain_integrity(classified.integrity_state),
                 now_ms,
                 hbv: hbv_output.clone(),
+                replay_hint: dopa_output.replay_hint,
+                reward_block: dopa_output.reward_block,
             });
         merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
         hypo_decision
@@ -711,6 +718,7 @@ impl RegulationEngine {
             dwm: pprf_output.active_dwm,
             profile: hypo_decision.profile_state,
             overlays: hypo_decision.overlays.clone(),
+            progress: dopa_output.progress,
             reward_block: dopa_output.reward_block,
             defense_pattern: Some(pag_output.pattern),
             replay_hint: dopa_output.replay_hint,
@@ -785,12 +793,16 @@ impl RegulationEngine {
             integrity,
             now_ms,
             hbv,
+            replay_hint,
+            reward_block,
         } = ctx;
         let previous_dwm = self.current_dwm;
         let sn_output = self.sn.tick(&SnInput {
             isv: isv.clone(),
             cooldown_class: cooldown,
             current_dwm: Some(previous_dwm),
+            replay_hint,
+            reward_block,
         });
 
         let sc_output = self.sc.tick(&ScInput {
@@ -1300,6 +1312,7 @@ fn build_insula_input(
     classified: &profiles::classification::ClassifiedSignals,
     cbv_present: bool,
     pev_present: bool,
+    progress: BrainLevel,
 ) -> InsulaInput {
     InsulaInput {
         policy_pressure: to_brain_level(classified.policy_pressure_class),
@@ -1311,6 +1324,7 @@ fn build_insula_input(
         cbv_present,
         pev_present,
         hbv_present: false,
+        progress,
         dominant_reason_codes: convert_reason_codes(&frame.reason_codes),
     }
 }
@@ -1319,7 +1333,6 @@ fn build_dopa_input(
     frame: &ucf::v1::SignalFrame,
     classified: &profiles::classification::ClassifiedSignals,
     amy_output: &dbm_9_amygdala::AmyOutput,
-    isv: &IsvSnapshot,
     counters: &WindowCounters,
     budget_stress: BrainLevel,
 ) -> Option<DopaInput> {
@@ -1348,7 +1361,7 @@ fn build_dopa_input(
     Some(DopaInput {
         integrity: to_brain_integrity(classified.integrity_state),
         threat: amy_output.threat,
-        policy_pressure: isv.policy_pressure,
+        policy_pressure: to_brain_level(classified.policy_pressure_class),
         receipt_invalid_present: classified.receipt_invalid_count > 0,
         dlp_critical_present: counters.medium_dlp_critical_count > 0,
         replay_mismatch_present: counters.medium_replay_mismatch,
