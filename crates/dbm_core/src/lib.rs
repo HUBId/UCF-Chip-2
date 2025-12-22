@@ -35,20 +35,15 @@ pub enum IntegrityState {
     Fail,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OrientTarget {
     Integrity,
     Dlp,
     Recovery,
+    #[default]
     Approval,
     Replay,
     PolicyPressure,
-}
-
-impl Default for OrientTarget {
-    fn default() -> Self {
-        OrientTarget::Approval
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
