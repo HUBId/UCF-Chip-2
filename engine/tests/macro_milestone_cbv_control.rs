@@ -21,6 +21,10 @@ fn base_frame() -> SignalFrame {
         }),
         exec_stats: Some(ExecStats {
             timeout_count: 0,
+            partial_failure_count: 0,
+            tool_unavailable_count: 0,
+            tool_id: None,
+            dlp_block_count: 0,
             top_reason_codes: vec![],
         }),
         integrity_state: IntegrityStateClass::Ok as i32,

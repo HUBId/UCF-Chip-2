@@ -23,6 +23,7 @@ dbm_stn = { path = "../crates/dbm_stn" }
 dbm_pmrf = { path = "../crates/dbm_pmrf" }
 dbm_sc = { path = "../crates/dbm_sc" }
 dbm_pprf = { path = "../crates/dbm_pprf" }
+dbm_18_cerebellum = { path = "../crates/dbm_18_cerebellum" }
 
 [dev-dependencies]
 pvgs_client = { path = "../pvgs_client", features = ["local-pvgs"] }

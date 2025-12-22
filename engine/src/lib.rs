@@ -4,6 +4,7 @@ use blake3::Hasher;
 use dbm_0_sn::{SnInput, SubstantiaNigra};
 use dbm_12_insula::{Insula, InsulaInput};
 use dbm_13_hypothalamus::{ControlDecision as HypoDecision, Hypothalamus, HypothalamusInput};
+use dbm_18_cerebellum::{CerInput, CerOutput, Cerebellum};
 use dbm_7_lc::{Lc, LcInput};
 use dbm_8_serotonin::{SerInput, Serotonin};
 use dbm_9_amygdala::{AmyInput, Amygdala};
@@ -102,6 +103,8 @@ pub struct RegulationEngine {
     sn: SubstantiaNigra,
     sc: Sc,
     pprf: Pprf,
+    cerebellum: Cerebellum,
+    last_cerebellum_output: Option<CerOutput>,
     current_dwm: DwmMode,
     current_target: OrientTarget,
     insula: Insula,
@@ -151,6 +154,8 @@ impl Default for RegulationEngine {
                 sn: SubstantiaNigra::new(),
                 sc: Sc::new(),
                 pprf: Pprf::new(),
+                cerebellum: Cerebellum::new(),
+                last_cerebellum_output: None,
                 current_dwm: DwmMode::ExecPlan,
                 current_target: OrientTarget::Approval,
                 insula: Insula::new(),
@@ -174,6 +179,8 @@ impl Default for RegulationEngine {
                 sn: SubstantiaNigra::new(),
                 sc: Sc::new(),
                 pprf: Pprf::new(),
+                cerebellum: Cerebellum::new(),
+                last_cerebellum_output: None,
                 current_dwm: DwmMode::ExecPlan,
                 current_target: OrientTarget::Approval,
                 insula: Insula::new(),
@@ -203,6 +210,8 @@ impl RegulationEngine {
             sn: SubstantiaNigra::new(),
             sc: Sc::new(),
             pprf: Pprf::new(),
+            cerebellum: Cerebellum::new(),
+            last_cerebellum_output: None,
             current_dwm: DwmMode::ExecPlan,
             current_target: OrientTarget::Approval,
             insula: Insula::new(),
@@ -319,6 +328,16 @@ impl RegulationEngine {
             self.pprf.on_medium_window_rollover();
         }
 
+        let cerebellum_output = self.tick_cerebellum(&frame, &classified);
+        let arousal_floor = if matches!(
+            cerebellum_output.as_ref().map(|output| output.divergence),
+            Some(BrainLevel::High)
+        ) {
+            BrainLevel::High
+        } else {
+            BrainLevel::Low
+        };
+
         let lc_output = self.lc.tick(&LcInput {
             integrity: to_brain_integrity(classified.integrity_state),
             receipt_invalid_count_short: self.counters.short_receipt_invalid_count,
@@ -326,7 +345,7 @@ impl RegulationEngine {
             dlp_critical_present_short: self.counters.short_dlp_critical_present,
             timeout_count_short: self.counters.short_timeout_count,
             deny_count_short: self.counters.short_deny_count,
-            arousal_floor: BrainLevel::Low,
+            arousal_floor,
         });
 
         let ser_output = self.serotonin.tick(&SerInput {
@@ -416,7 +435,12 @@ impl RegulationEngine {
         self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
         self.extend_reason_codes(&mut translated, &pmrf_output.reason_codes);
         self.extend_reason_codes(&mut translated, &pprf_output.reason_codes);
+        if let Some(output) = &cerebellum_output {
+            self.extend_reason_codes(&mut translated, &output.reason_codes);
+        }
+
         translated = self.apply_stn_pmrf_overlays(translated, &stn_output, &pmrf_output);
+        translated = self.apply_cerebellum_overlays(translated, &cerebellum_output);
         self.append_dwm_reason_codes(previous_dwm, pprf_output.active_dwm, &mut translated);
         translated
     }
@@ -442,6 +466,16 @@ impl RegulationEngine {
             self.pprf.on_medium_window_rollover();
         }
 
+        let cerebellum_output = self.last_cerebellum_output.clone();
+        let arousal_floor = if matches!(
+            cerebellum_output.as_ref().map(|output| output.divergence),
+            Some(BrainLevel::High)
+        ) {
+            BrainLevel::High
+        } else {
+            BrainLevel::Low
+        };
+
         let lc_output = self.lc.tick(&LcInput {
             integrity: to_brain_integrity(classified.integrity_state),
             receipt_invalid_count_short: self.counters.short_receipt_invalid_count,
@@ -449,7 +483,7 @@ impl RegulationEngine {
             dlp_critical_present_short: self.counters.short_dlp_critical_present,
             timeout_count_short: self.counters.short_timeout_count,
             deny_count_short: self.counters.short_deny_count,
-            arousal_floor: BrainLevel::Low,
+            arousal_floor,
         });
 
         let ser_output = self.serotonin.tick(&SerInput {
@@ -527,7 +561,12 @@ impl RegulationEngine {
         self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
         self.extend_reason_codes(&mut translated, &pmrf_output.reason_codes);
         self.extend_reason_codes(&mut translated, &pprf_output.reason_codes);
+        if let Some(output) = &cerebellum_output {
+            self.extend_reason_codes(&mut translated, &output.reason_codes);
+        }
+
         translated = self.apply_stn_pmrf_overlays(translated, &stn_output, &pmrf_output);
+        translated = self.apply_cerebellum_overlays(translated, &cerebellum_output);
         self.append_dwm_reason_codes(previous_dwm, pprf_output.active_dwm, &mut translated);
         translated
     }
@@ -536,6 +575,36 @@ impl RegulationEngine {
         let decision = self.apply_forensic_override(decision);
         let decision = self.apply_anti_flapping(decision, now_ms);
         self.render_control_frame(decision)
+    }
+
+    fn tick_cerebellum(
+        &mut self,
+        frame: &ucf::v1::SignalFrame,
+        classified: &profiles::classification::ClassifiedSignals,
+    ) -> Option<CerOutput> {
+        if classified.window_kind != ucf::v1::WindowKind::Medium {
+            return None;
+        }
+
+        let exec_stats = frame.exec_stats.as_ref();
+        let cer_input = CerInput {
+            timeout_count_medium: exec_stats.map(|stats| stats.timeout_count).unwrap_or(0),
+            partial_failure_count_medium: exec_stats
+                .map(|stats| stats.partial_failure_count)
+                .unwrap_or(0),
+            tool_unavailable_count_medium: exec_stats
+                .map(|stats| stats.tool_unavailable_count)
+                .unwrap_or(0),
+            receipt_invalid_present: classified.receipt_invalid_count > 0,
+            integrity: to_brain_integrity(classified.integrity_state),
+            tool_id: exec_stats.and_then(|stats| stats.tool_id.clone()),
+            dlp_block_count_medium: exec_stats.map(|stats| stats.dlp_block_count).unwrap_or(0),
+        };
+
+        let output = self.cerebellum.tick(&cer_input);
+        self.rsv.divergence = translate_level(output.divergence);
+        self.last_cerebellum_output = Some(output.clone());
+        Some(output)
     }
 
     fn run_sn_sc_and_hypothalamus(
@@ -641,6 +710,22 @@ impl RegulationEngine {
             || decision.overlays.export_lock
             || decision.overlays.novelty_lock
         {
+            decision.overlays.chain_tightening = true;
+        }
+
+        decision
+    }
+
+    fn apply_cerebellum_overlays(
+        &self,
+        mut decision: ControlDecision,
+        cerebellum_output: &Option<CerOutput>,
+    ) -> ControlDecision {
+        if matches!(
+            cerebellum_output.as_ref().map(|output| output.divergence),
+            Some(BrainLevel::High)
+        ) {
+            decision.overlays.simulate_first = true;
             decision.overlays.chain_tightening = true;
         }
 
@@ -1356,6 +1441,10 @@ fn translate_reason_set(reason_set: &dbm_core::ReasonSet) -> Vec<ucf::v1::Reason
                 Some(ucf::v1::ReasonCode::RcGvFocusShiftBlockedByLock)
             }
             "RC.GV.FLAPPING.PENALTY" => Some(ucf::v1::ReasonCode::RcGvFlappingPenalty),
+            "RC.GV.DIVERGENCE.HIGH" => Some(ucf::v1::ReasonCode::RcGvDivergenceHigh),
+            "RC.GV.TOOL.SUSPEND_RECOMMENDED" => {
+                Some(ucf::v1::ReasonCode::RcGvToolSuspendRecommended)
+            }
             _ => None,
         })
         .collect();
@@ -1409,6 +1498,10 @@ mod tests {
             }),
             exec_stats: Some(ExecStats {
                 timeout_count: 0,
+                partial_failure_count: 0,
+                tool_unavailable_count: 0,
+                tool_id: None,
+                dlp_block_count: 0,
                 top_reason_codes: Vec::new(),
             }),
             integrity_state: IntegrityStateClass::Ok as i32,
@@ -2126,8 +2219,14 @@ mod tests {
     #[test]
     fn pmrf_divergence_split_enables_checkpointing() {
         let mut frame = base_frame();
+        frame.window_kind = WindowKind::Medium as i32;
+        frame.window_index = Some(1);
         frame.exec_stats = Some(ExecStats {
-            timeout_count: 5,
+            timeout_count: 10,
+            partial_failure_count: 0,
+            tool_unavailable_count: 0,
+            tool_id: None,
+            dlp_block_count: 0,
             top_reason_codes: Vec::new(),
         });
 
@@ -2139,6 +2238,37 @@ mod tests {
         assert!(control
             .profile_reason_codes
             .contains(&(ReasonCode::RcGvSequenceSplitRequired as i32)));
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcGvDivergenceHigh as i32)));
+    }
+
+    #[test]
+    fn repeated_divergence_high_recommends_suspend() {
+        let mut engine = RegulationEngine::default();
+        let mut frame = base_frame();
+        frame.window_kind = WindowKind::Medium as i32;
+        frame.window_index = Some(1);
+        frame.exec_stats = Some(ExecStats {
+            timeout_count: 10,
+            partial_failure_count: 0,
+            tool_unavailable_count: 0,
+            tool_id: Some("tool-a".to_string()),
+            dlp_block_count: 0,
+            top_reason_codes: Vec::new(),
+        });
+
+        let _ = engine.on_signal_frame(frame.clone(), 1);
+        let mut second_frame = frame.clone();
+        second_frame.window_index = Some(2);
+        let control = engine.on_signal_frame(second_frame, 2);
+
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcGvToolSuspendRecommended as i32)));
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcGvDivergenceHigh as i32)));
     }
 
     #[test]

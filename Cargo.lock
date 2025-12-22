@@ -198,6 +198,7 @@ dependencies = [
  "dbm_0_sn",
  "dbm_12_insula",
  "dbm_13_hypothalamus",
+ "dbm_18_cerebellum",
  "dbm_7_lc",
  "dbm_8_serotonin",
  "dbm_9_amygdala",

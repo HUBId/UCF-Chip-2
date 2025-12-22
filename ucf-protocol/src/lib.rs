@@ -83,6 +83,8 @@ pub mod v1 {
         RcGvFocusShiftExecuted = 53,
         RcGvFocusShiftBlockedByLock = 54,
         RcGvFlappingPenalty = 55,
+        RcGvDivergenceHigh = 56,
+        RcGvToolSuspendRecommended = 57,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
@@ -171,7 +173,15 @@ pub mod v1 {
     pub struct ExecStats {
         #[prost(uint32, tag = "1")]
         pub timeout_count: u32,
-        #[prost(enumeration = "ReasonCode", repeated, tag = "2")]
+        #[prost(uint32, tag = "2")]
+        pub partial_failure_count: u32,
+        #[prost(uint32, tag = "3")]
+        pub tool_unavailable_count: u32,
+        #[prost(string, optional, tag = "4")]
+        pub tool_id: Option<::prost::alloc::string::String>,
+        #[prost(uint32, tag = "5")]
+        pub dlp_block_count: u32,
+        #[prost(enumeration = "ReasonCode", repeated, tag = "6")]
         pub top_reason_codes: ::prost::alloc::vec::Vec<i32>,
     }
 
