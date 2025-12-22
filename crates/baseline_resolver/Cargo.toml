@@ -1,0 +1,8 @@
+[package]
+name = "baseline_resolver"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dbm_core = { path = "../dbm_core" }
+ucf = { package = "ucf-protocol", path = "../../ucf-protocol" }
