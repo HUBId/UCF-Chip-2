@@ -462,6 +462,9 @@ impl RegulationEngine {
             &pag_output,
             to_brain_level(classified.policy_pressure_class),
         );
+        hypo_decision
+            .reason_codes
+            .extend(dopa_output.reason_codes.codes.clone());
 
         self.update_emotion_field(EmotionFieldInput {
             isv: emotion_isv,
@@ -470,13 +473,14 @@ impl RegulationEngine {
             overlays: hypo_decision.overlays.clone(),
             reward_block: dopa_output.reward_block,
             defense_pattern: Some(pag_output.pattern),
-            replay_hint: false,
+            replay_hint: dopa_output.replay_hint,
         });
 
         let mut translated = translate_decision(hypo_decision, &self.config, false);
         self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
         self.extend_reason_codes(&mut translated, &pmrf_output.reason_codes);
         self.extend_reason_codes(&mut translated, &pprf_output.reason_codes);
+        self.extend_reason_codes(&mut translated, &dopa_output.reason_codes);
         if let Some(output) = &cerebellum_output {
             self.extend_reason_codes(&mut translated, &output.reason_codes);
         }
@@ -603,6 +607,9 @@ impl RegulationEngine {
             &pag_output,
             to_brain_level(classified.policy_pressure_class),
         );
+        hypo_decision
+            .reason_codes
+            .extend(dopa_output.reason_codes.codes.clone());
 
         self.update_emotion_field(EmotionFieldInput {
             isv: emotion_isv,
@@ -611,13 +618,14 @@ impl RegulationEngine {
             overlays: hypo_decision.overlays.clone(),
             reward_block: dopa_output.reward_block,
             defense_pattern: Some(pag_output.pattern),
-            replay_hint: false,
+            replay_hint: dopa_output.replay_hint,
         });
 
         let mut translated = translate_decision(hypo_decision, &self.config, true);
         self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
         self.extend_reason_codes(&mut translated, &pmrf_output.reason_codes);
         self.extend_reason_codes(&mut translated, &pprf_output.reason_codes);
+        self.extend_reason_codes(&mut translated, &dopa_output.reason_codes);
         if let Some(output) = &cerebellum_output {
             self.extend_reason_codes(&mut translated, &output.reason_codes);
         }
