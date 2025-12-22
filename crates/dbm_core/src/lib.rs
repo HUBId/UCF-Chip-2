@@ -20,6 +20,14 @@ pub enum CooldownClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UrgencyClass {
+    #[default]
+    Low,
+    Med,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntegrityState {
     #[default]
     Ok,
@@ -28,11 +36,33 @@ pub enum IntegrityState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrientTarget {
+    Integrity,
+    Dlp,
+    Recovery,
+    Approval,
+    Replay,
+    PolicyPressure,
+}
+
+impl Default for OrientTarget {
+    fn default() -> Self {
+        OrientTarget::Approval
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DwmMode {
     Simulate,
     ExecPlan,
     Stabilize,
     Report,
+}
+
+impl Default for DwmMode {
+    fn default() -> Self {
+        DwmMode::ExecPlan
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

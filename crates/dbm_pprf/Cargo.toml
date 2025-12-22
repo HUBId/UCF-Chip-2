@@ -8,3 +8,4 @@ path = "src/lib.rs"
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
+dbm_sc = { path = "../dbm_sc" }
