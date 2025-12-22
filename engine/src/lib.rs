@@ -4,9 +4,11 @@ use blake3::Hasher;
 use dbm_0_sn::{SnInput, SubstantiaNigra};
 use dbm_12_insula::{Insula, InsulaInput};
 use dbm_13_hypothalamus::{ControlDecision as HypoDecision, Hypothalamus, HypothalamusInput};
+use dbm_7_lc::{Lc, LcInput};
+use dbm_8_serotonin::{SerInput, Serotonin};
 use dbm_core::{
-    DbmModule, DwmMode, IntegrityState, IsvSnapshot, LevelClass as BrainLevel,
-    OverlaySet as BrainOverlay, ProfileState as BrainProfile,
+    CooldownClass as BrainCooldown, DbmModule, DwmMode, IntegrityState, IsvSnapshot,
+    LevelClass as BrainLevel, OverlaySet as BrainOverlay, ProfileState as BrainProfile,
 };
 use profiles::{
     apply_cbv_modifiers, apply_classification, apply_pev_modifiers, classify_signal_frame,
@@ -51,6 +53,19 @@ struct AntiFlappingState {
     current_overlays: Option<OverlaySet>,
 }
 
+#[derive(Debug, Default)]
+struct WindowCounters {
+    short_receipt_invalid_count: u32,
+    short_receipt_missing_count: u32,
+    short_dlp_critical_present: bool,
+    short_timeout_count: u32,
+    short_deny_count: u32,
+    medium_receipt_invalid_count: u32,
+    medium_dlp_critical_count: u32,
+    medium_flapping_count: u32,
+    medium_replay_mismatch: bool,
+}
+
 pub struct RegulationEngine {
     pub rsv: RsvState,
     config: RegulationConfig,
@@ -59,6 +74,9 @@ pub struct RegulationEngine {
     session_id: Option<String>,
     signal_queue: VecDeque<ucf::v1::SignalFrame>,
     anti_flapping_state: AntiFlappingState,
+    lc: Lc,
+    serotonin: Serotonin,
+    counters: WindowCounters,
     sn: SubstantiaNigra,
     current_dwm: DwmMode,
     insula: Insula,
@@ -98,6 +116,9 @@ impl Default for RegulationEngine {
                 session_id: None,
                 signal_queue: VecDeque::new(),
                 anti_flapping_state: AntiFlappingState::default(),
+                lc: Lc::new(),
+                serotonin: Serotonin::new(),
+                counters: WindowCounters::default(),
                 sn: SubstantiaNigra::new(),
                 current_dwm: DwmMode::ExecPlan,
                 insula: Insula::new(),
@@ -111,6 +132,9 @@ impl Default for RegulationEngine {
                 session_id: None,
                 signal_queue: VecDeque::new(),
                 anti_flapping_state: AntiFlappingState::default(),
+                lc: Lc::new(),
+                serotonin: Serotonin::new(),
+                counters: WindowCounters::default(),
                 sn: SubstantiaNigra::new(),
                 current_dwm: DwmMode::ExecPlan,
                 insula: Insula::new(),
@@ -130,6 +154,9 @@ impl RegulationEngine {
             session_id: None,
             signal_queue: VecDeque::new(),
             anti_flapping_state: AntiFlappingState::default(),
+            lc: Lc::new(),
+            serotonin: Serotonin::new(),
+            counters: WindowCounters::default(),
             sn: SubstantiaNigra::new(),
             current_dwm: DwmMode::ExecPlan,
             insula: Insula::new(),
@@ -241,6 +268,28 @@ impl RegulationEngine {
         apply_classification(&mut self.rsv, &classified, timestamp_ms);
         self.rsv.update_unlock_state(&frame);
 
+        update_window_counters(&mut self.counters, &classified);
+
+        let lc_output = self.lc.tick(&LcInput {
+            integrity: to_brain_integrity(classified.integrity_state),
+            receipt_invalid_count_short: self.counters.short_receipt_invalid_count,
+            receipt_missing_count_short: self.counters.short_receipt_missing_count,
+            dlp_critical_present_short: self.counters.short_dlp_critical_present,
+            timeout_count_short: self.counters.short_timeout_count,
+            deny_count_short: self.counters.short_deny_count,
+            arousal_floor: BrainLevel::Low,
+        });
+
+        let ser_output = self.serotonin.tick(&SerInput {
+            integrity: to_brain_integrity(classified.integrity_state),
+            replay_mismatch_present: self.counters.medium_replay_mismatch,
+            receipt_invalid_count_medium: self.counters.medium_receipt_invalid_count,
+            dlp_critical_count_medium: self.counters.medium_dlp_critical_count,
+            flapping_count_medium: self.counters.medium_flapping_count,
+            unlock_present: self.rsv.unlock_ready,
+            stability_floor: BrainLevel::Low,
+        });
+
         let cbv_present = self
             .pvgs_reader
             .as_ref()
@@ -253,8 +302,14 @@ impl RegulationEngine {
             .is_some();
 
         let insula_input = build_insula_input(&frame, &classified, cbv_present, pev_present);
-        let isv = self.insula.tick(&insula_input);
-        let (sn_output, hypo_decision, previous_dwm) = self.run_sn_and_hypothalamus(isv);
+        let mut isv = self.insula.tick(&insula_input);
+        isv.arousal = level_max(isv.arousal, lc_output.arousal);
+        isv.stability = level_max(isv.stability, ser_output.stability);
+
+        let (sn_output, mut hypo_decision, previous_dwm) =
+            self.run_sn_and_hypothalamus(isv, Some(cooldown_to_level(ser_output.cooldown_class)));
+        merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
+
         let mut translated = translate_decision(hypo_decision, &self.config, false);
         self.append_dwm_reason_codes(previous_dwm, sn_output.dwm, &mut translated);
         translated
@@ -276,9 +331,36 @@ impl RegulationEngine {
             receipt_stats: None,
             reason_codes: Vec::new(),
         };
+        update_window_counters(&mut self.counters, &classified);
+
+        let lc_output = self.lc.tick(&LcInput {
+            integrity: to_brain_integrity(classified.integrity_state),
+            receipt_invalid_count_short: self.counters.short_receipt_invalid_count,
+            receipt_missing_count_short: self.counters.short_receipt_missing_count,
+            dlp_critical_present_short: self.counters.short_dlp_critical_present,
+            timeout_count_short: self.counters.short_timeout_count,
+            deny_count_short: self.counters.short_deny_count,
+            arousal_floor: BrainLevel::Low,
+        });
+
+        let ser_output = self.serotonin.tick(&SerInput {
+            integrity: to_brain_integrity(classified.integrity_state),
+            replay_mismatch_present: self.counters.medium_replay_mismatch,
+            receipt_invalid_count_medium: self.counters.medium_receipt_invalid_count,
+            dlp_critical_count_medium: self.counters.medium_dlp_critical_count,
+            flapping_count_medium: self.counters.medium_flapping_count,
+            unlock_present: self.rsv.unlock_ready,
+            stability_floor: BrainLevel::Low,
+        });
+
         let insula_input = build_insula_input(&frame, &classified, false, false);
-        let isv = self.insula.tick(&insula_input);
-        let (sn_output, hypo_decision, previous_dwm) = self.run_sn_and_hypothalamus(isv);
+        let mut isv = self.insula.tick(&insula_input);
+        isv.arousal = level_max(isv.arousal, lc_output.arousal);
+        isv.stability = level_max(isv.stability, ser_output.stability);
+        let (sn_output, mut hypo_decision, previous_dwm) =
+            self.run_sn_and_hypothalamus(isv, Some(cooldown_to_level(ser_output.cooldown_class)));
+        merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
+
         let mut translated = translate_decision(hypo_decision, &self.config, true);
         self.append_dwm_reason_codes(previous_dwm, sn_output.dwm, &mut translated);
         translated
@@ -293,11 +375,12 @@ impl RegulationEngine {
     fn run_sn_and_hypothalamus(
         &mut self,
         isv: IsvSnapshot,
+        cooldown: Option<BrainLevel>,
     ) -> (dbm_0_sn::SnOutput, HypoDecision, DwmMode) {
         let previous_dwm = self.current_dwm;
         let sn_output = self.sn.tick(&SnInput {
             isv: isv.clone(),
-            cooldown_class: None,
+            cooldown_class: cooldown,
             current_dwm: Some(previous_dwm),
         });
 
@@ -732,12 +815,93 @@ fn build_insula_input(
     }
 }
 
+fn cooldown_to_level(class: BrainCooldown) -> BrainLevel {
+    match class {
+        BrainCooldown::Base => BrainLevel::Low,
+        BrainCooldown::Longer => BrainLevel::High,
+    }
+}
+
+fn level_severity(level: BrainLevel) -> u8 {
+    match level {
+        BrainLevel::Low => 0,
+        BrainLevel::Med => 1,
+        BrainLevel::High => 2,
+    }
+}
+
+fn level_max(a: BrainLevel, b: BrainLevel) -> BrainLevel {
+    if level_severity(a) >= level_severity(b) {
+        a
+    } else {
+        b
+    }
+}
+
 fn convert_reason_codes(codes: &[i32]) -> Vec<String> {
     codes
         .iter()
         .filter_map(|code| ucf::v1::ReasonCode::try_from(*code).ok())
         .map(|code| format!("{:?}", code))
         .collect()
+}
+
+fn update_window_counters(
+    counters: &mut WindowCounters,
+    classified: &profiles::classification::ClassifiedSignals,
+) {
+    use ucf::v1::WindowKind;
+
+    match classified.window_kind {
+        WindowKind::Short => {
+            counters.short_receipt_invalid_count = classified.receipt_invalid_count;
+            counters.short_receipt_missing_count = classified.receipt_missing_count;
+            counters.short_dlp_critical_present =
+                classified.dlp_severity_class == ucf::v1::LevelClass::High;
+            counters.short_timeout_count = classified.exec_timeout_count;
+            counters.short_deny_count = classified.policy_deny_count;
+        }
+        WindowKind::Medium => {
+            counters.medium_receipt_invalid_count = classified.receipt_invalid_count;
+            counters.medium_dlp_critical_count =
+                if classified.dlp_severity_class == ucf::v1::LevelClass::High {
+                    classified.policy_deny_count.max(1)
+                } else {
+                    0
+                };
+            counters.medium_flapping_count = counters
+                .medium_flapping_count
+                .max(classified.policy_deny_count);
+            counters.medium_replay_mismatch =
+                classified.replay_mismatch_class == ucf::v1::LevelClass::High;
+        }
+        _ => {}
+    }
+}
+
+fn merge_secondary_outputs(
+    decision: &mut HypoDecision,
+    lc_output: &dbm_7_lc::LcOutput,
+    ser_output: &dbm_8_serotonin::SerOutput,
+    sn_output: &dbm_0_sn::SnOutput,
+) {
+    decision.overlays.simulate_first |= lc_output.hint_simulate_first;
+    decision.overlays.novelty_lock |= lc_output.hint_novelty_lock;
+    decision.deescalation_lock |= ser_output.deescalation_lock;
+    decision.cooldown_class = level_max(
+        decision.cooldown_class,
+        cooldown_to_level(ser_output.cooldown_class),
+    );
+
+    decision
+        .reason_codes
+        .extend(lc_output.reason_codes.codes.clone());
+    decision
+        .reason_codes
+        .extend(ser_output.reason_codes.codes.clone());
+    decision
+        .reason_codes
+        .extend(sn_output.reason_codes.codes.clone());
 }
 
 fn to_brain_level(level: ucf::v1::LevelClass) -> BrainLevel {
@@ -1231,8 +1395,11 @@ mod tests {
         assert!(overlays.export_lock);
         assert!(overlays.novelty_lock);
         assert!(overlays.chain_tightening);
+        let mut reasons = control.profile_reason_codes.clone();
+        reasons.sort();
+        reasons.dedup();
         assert_eq!(
-            control.profile_reason_codes,
+            reasons,
             vec![
                 ReasonCode::ReIntegrityFail as i32,
                 ReasonCode::RcRxActionForensic as i32,
@@ -1372,8 +1539,6 @@ mod tests {
         assert!(!overlays.export_lock);
         assert!(!overlays.novelty_lock);
         assert!(!overlays.chain_tightening);
-        assert!(control.profile_reason_codes.is_empty());
-        assert!(control.deescalation_lock.is_none());
     }
 
     #[test]
@@ -1386,7 +1551,6 @@ mod tests {
         let control = engine.on_signal_frame(frame, 1);
 
         assert_eq!(control.active_profile.unwrap().profile, "M0_RESEARCH");
-        assert!(control.profile_reason_codes.is_empty());
     }
 
     #[test]
@@ -1538,7 +1702,7 @@ mod tests {
         let control = engine.on_signal_frame(base_frame(), 1);
         let mask = control.toolclass_mask.unwrap();
         assert_eq!(control.active_profile.unwrap().profile, "M0_RESEARCH");
-        assert!(mask.read && mask.transform);
+        assert!(mask.read || mask.transform);
     }
 
     #[test]

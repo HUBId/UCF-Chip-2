@@ -197,6 +197,8 @@ dependencies = [
  "dbm_0_sn",
  "dbm_12_insula",
  "dbm_13_hypothalamus",
+ "dbm_7_lc",
+ "dbm_8_serotonin",
  "dbm_core",
  "profiles",
  "prost",
