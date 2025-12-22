@@ -5,6 +5,7 @@ use dbm_0_sn::{SnInput, SubstantiaNigra};
 use dbm_12_insula::{Insula, InsulaInput};
 use dbm_13_hypothalamus::{ControlDecision as HypoDecision, Hypothalamus, HypothalamusInput};
 use dbm_18_cerebellum::{CerInput, CerOutput, Cerebellum};
+use dbm_6_dopamin_nacc::DopaminNacc;
 use dbm_7_lc::{Lc, LcInput};
 use dbm_8_serotonin::{SerInput, Serotonin};
 use dbm_9_amygdala::{AmyInput, Amygdala};
@@ -86,6 +87,11 @@ struct RunSnContext {
     now_ms: u64,
 }
 
+#[derive(Debug, Clone, Default)]
+struct DopaOutput {
+    reward_block: bool,
+}
+
 pub struct RegulationEngine {
     pub rsv: RsvState,
     config: RegulationConfig,
@@ -106,6 +112,8 @@ pub struct RegulationEngine {
     pprf: Pprf,
     cerebellum: Cerebellum,
     last_cerebellum_output: Option<CerOutput>,
+    dopamin: DopaminNacc,
+    last_dopa_output: Option<DopaOutput>,
     emotion_field: EmotionFieldModule,
     last_emotion_field: Option<dbm_core::EmotionField>,
     current_dwm: DwmMode,
@@ -159,6 +167,8 @@ impl Default for RegulationEngine {
                 pprf: Pprf::new(),
                 cerebellum: Cerebellum::new(),
                 last_cerebellum_output: None,
+                dopamin: DopaminNacc::new(),
+                last_dopa_output: None,
                 emotion_field: EmotionFieldModule::new(),
                 last_emotion_field: None,
                 current_dwm: DwmMode::ExecPlan,
@@ -186,6 +196,8 @@ impl Default for RegulationEngine {
                 pprf: Pprf::new(),
                 cerebellum: Cerebellum::new(),
                 last_cerebellum_output: None,
+                dopamin: DopaminNacc::new(),
+                last_dopa_output: None,
                 emotion_field: EmotionFieldModule::new(),
                 last_emotion_field: None,
                 current_dwm: DwmMode::ExecPlan,
@@ -219,6 +231,8 @@ impl RegulationEngine {
             pprf: Pprf::new(),
             cerebellum: Cerebellum::new(),
             last_cerebellum_output: None,
+            dopamin: DopaminNacc::new(),
+            last_dopa_output: None,
             emotion_field: EmotionFieldModule::new(),
             last_emotion_field: None,
             current_dwm: DwmMode::ExecPlan,
@@ -389,6 +403,10 @@ impl RegulationEngine {
             stability: ser_output.stability,
         });
 
+        let dopa_output = self.last_dopa_output.clone().unwrap_or_default();
+        self.dopamin.tick();
+        self.last_dopa_output = Some(dopa_output.clone());
+
         let cbv_present = self
             .pvgs_reader
             .as_ref()
@@ -456,7 +474,7 @@ impl RegulationEngine {
             dwm: pprf_output.active_dwm,
             profile: hypo_decision.profile_state,
             overlays: hypo_decision.overlays.clone(),
-            reward_block: false,
+            reward_block: dopa_output.reward_block,
             defense_pattern: Some(pag_output.pattern),
             replay_hint: false,
         });
@@ -539,6 +557,10 @@ impl RegulationEngine {
             stability: ser_output.stability,
         });
 
+        let dopa_output = self.last_dopa_output.clone().unwrap_or_default();
+        self.dopamin.tick();
+        self.last_dopa_output = Some(dopa_output.clone());
+
         let insula_input = build_insula_input(&frame, &classified, false, false);
         let mut isv = self.insula.tick(&insula_input);
         isv.threat = level_max(isv.threat, amy_output.threat);
@@ -594,7 +616,7 @@ impl RegulationEngine {
             dwm: pprf_output.active_dwm,
             profile: hypo_decision.profile_state,
             overlays: hypo_decision.overlays.clone(),
-            reward_block: false,
+            reward_block: dopa_output.reward_block,
             defense_pattern: Some(pag_output.pattern),
             replay_hint: false,
         });

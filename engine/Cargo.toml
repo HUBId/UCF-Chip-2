@@ -15,6 +15,7 @@ dbm_core = { path = "../crates/dbm_core" }
 dbm_12_insula = { path = "../crates/dbm_12_insula" }
 dbm_13_hypothalamus = { path = "../crates/dbm_13_hypothalamus" }
 dbm_0_sn = { path = "../crates/dbm_0_sn" }
+dbm_6_dopamin_nacc = { path = "../crates/dbm_6_dopamin_nacc" }
 dbm_7_lc = { path = "../crates/dbm_7_lc" }
 dbm_8_serotonin = { path = "../crates/dbm_8_serotonin" }
 dbm_9_amygdala = { path = "../crates/dbm_9_amygdala" }
