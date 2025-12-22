@@ -12,6 +12,8 @@ use dbm_core::{
     LevelClass as BrainLevel, OverlaySet as BrainOverlay, ProfileState as BrainProfile,
 };
 use dbm_pag::{DefensePattern, Pag, PagInput};
+use dbm_pmrf::{Pmrf, PmrfInput};
+use dbm_stn::{Stn, StnInput};
 use profiles::{
     apply_cbv_modifiers, apply_classification, apply_pev_modifiers, classify_signal_frame,
     ControlDecision, FlappingPenaltyMode, OverlaySet, ProfileState, RegulationConfig,
@@ -80,6 +82,8 @@ pub struct RegulationEngine {
     serotonin: Serotonin,
     amygdala: Amygdala,
     pag: Pag,
+    stn: Stn,
+    pmrf: Pmrf,
     counters: WindowCounters,
     sn: SubstantiaNigra,
     current_dwm: DwmMode,
@@ -124,6 +128,8 @@ impl Default for RegulationEngine {
                 serotonin: Serotonin::new(),
                 amygdala: Amygdala::new(),
                 pag: Pag::new(),
+                stn: Stn::new(),
+                pmrf: Pmrf::new(),
                 counters: WindowCounters::default(),
                 sn: SubstantiaNigra::new(),
                 current_dwm: DwmMode::ExecPlan,
@@ -142,6 +148,8 @@ impl Default for RegulationEngine {
                 serotonin: Serotonin::new(),
                 amygdala: Amygdala::new(),
                 pag: Pag::new(),
+                stn: Stn::new(),
+                pmrf: Pmrf::new(),
                 counters: WindowCounters::default(),
                 sn: SubstantiaNigra::new(),
                 current_dwm: DwmMode::ExecPlan,
@@ -166,6 +174,8 @@ impl RegulationEngine {
             serotonin: Serotonin::new(),
             amygdala: Amygdala::new(),
             pag: Pag::new(),
+            stn: Stn::new(),
+            pmrf: Pmrf::new(),
             counters: WindowCounters::default(),
             sn: SubstantiaNigra::new(),
             current_dwm: DwmMode::ExecPlan,
@@ -335,6 +345,23 @@ impl RegulationEngine {
         isv.arousal = level_max(isv.arousal, lc_output.arousal);
         isv.stability = level_max(isv.stability, ser_output.stability);
 
+        let stn_output = self.stn.tick(&StnInput {
+            policy_pressure: isv.policy_pressure,
+            arousal: lc_output.arousal,
+            threat: amy_output.threat,
+            receipt_invalid_present: classified.receipt_invalid_count > 0,
+            dlp_critical_present: self.counters.short_dlp_critical_present,
+            integrity: to_brain_integrity(classified.integrity_state),
+        });
+
+        let pmrf_output = self.pmrf.tick(&PmrfInput {
+            divergence: to_brain_level(self.rsv.divergence),
+            policy_pressure: isv.policy_pressure,
+            stability: ser_output.stability,
+            hold_active: stn_output.hold_active,
+            budget_stress: to_brain_level(self.rsv.budget_stress),
+        });
+
         let (sn_output, mut hypo_decision, previous_dwm) =
             self.run_sn_and_hypothalamus(isv, Some(cooldown_to_level(ser_output.cooldown_class)));
         merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
@@ -345,6 +372,9 @@ impl RegulationEngine {
         );
 
         let mut translated = translate_decision(hypo_decision, &self.config, false);
+        self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
+        self.extend_reason_codes(&mut translated, &pmrf_output.reason_codes);
+        translated = self.apply_stn_pmrf_overlays(translated, &stn_output, &pmrf_output);
         self.append_dwm_reason_codes(previous_dwm, sn_output.dwm, &mut translated);
         translated
     }
@@ -410,6 +440,23 @@ impl RegulationEngine {
             .extend(pag_output.reason_codes.codes.clone());
         isv.arousal = level_max(isv.arousal, lc_output.arousal);
         isv.stability = level_max(isv.stability, ser_output.stability);
+
+        let stn_output = self.stn.tick(&StnInput {
+            policy_pressure: isv.policy_pressure,
+            arousal: lc_output.arousal,
+            threat: amy_output.threat,
+            receipt_invalid_present: classified.receipt_invalid_count > 0,
+            dlp_critical_present: self.counters.short_dlp_critical_present,
+            integrity: to_brain_integrity(classified.integrity_state),
+        });
+
+        let pmrf_output = self.pmrf.tick(&PmrfInput {
+            divergence: to_brain_level(self.rsv.divergence),
+            policy_pressure: isv.policy_pressure,
+            stability: ser_output.stability,
+            hold_active: stn_output.hold_active,
+            budget_stress: to_brain_level(self.rsv.budget_stress),
+        });
         let (sn_output, mut hypo_decision, previous_dwm) =
             self.run_sn_and_hypothalamus(isv, Some(cooldown_to_level(ser_output.cooldown_class)));
         merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
@@ -420,6 +467,9 @@ impl RegulationEngine {
         );
 
         let mut translated = translate_decision(hypo_decision, &self.config, true);
+        self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
+        self.extend_reason_codes(&mut translated, &pmrf_output.reason_codes);
+        translated = self.apply_stn_pmrf_overlays(translated, &stn_output, &pmrf_output);
         self.append_dwm_reason_codes(previous_dwm, sn_output.dwm, &mut translated);
         translated
     }
@@ -464,6 +514,47 @@ impl RegulationEngine {
         if previous_dwm != new_dwm {
             decision.profile_reason_codes.push(dwm_reason_code(new_dwm));
         }
+    }
+
+    fn extend_reason_codes(
+        &self,
+        decision: &mut ControlDecision,
+        reason_set: &dbm_core::ReasonSet,
+    ) {
+        let mut translated = translate_reason_set(reason_set);
+        decision.profile_reason_codes.append(&mut translated);
+        decision
+            .profile_reason_codes
+            .sort_by_key(|code| *code as i32);
+        decision.profile_reason_codes.dedup();
+    }
+
+    fn apply_stn_pmrf_overlays(
+        &self,
+        mut decision: ControlDecision,
+        stn_output: &dbm_stn::StnOutput,
+        pmrf_output: &dbm_pmrf::PmrfOutput,
+    ) -> ControlDecision {
+        decision.overlays.simulate_first |= stn_output.hint_simulate_first;
+        decision.overlays.novelty_lock |= stn_output.hint_novelty_lock;
+        decision.overlays.export_lock |= stn_output.hint_export_lock;
+
+        if pmrf_output.chain_tightening {
+            decision.overlays.chain_tightening = true;
+        }
+
+        if pmrf_output.checkpoint_required {
+            decision.overlays.simulate_first = true;
+        }
+
+        if decision.overlays.simulate_first
+            || decision.overlays.export_lock
+            || decision.overlays.novelty_lock
+        {
+            decision.overlays.chain_tightening = true;
+        }
+
+        decision
     }
 
     fn apply_forensic_override(&mut self, mut decision: ControlDecision) -> ControlDecision {
@@ -1152,6 +1243,9 @@ fn translate_reason_set(reason_set: &dbm_core::ReasonSet) -> Vec<ucf::v1::Reason
             "RcRxActionForensic" | "RC.RX.ACTION.FORENSIC" => {
                 Some(ucf::v1::ReasonCode::RcRxActionForensic)
             }
+            "RC.GV.HOLD.ON" => Some(ucf::v1::ReasonCode::RcGvHoldOn),
+            "RC.GV.SEQUENCE.SPLIT_REQUIRED" => Some(ucf::v1::ReasonCode::RcGvSequenceSplitRequired),
+            "RC.GV.SEQUENCE.SLOW" => Some(ucf::v1::ReasonCode::RcGvSequenceSlow),
             "RcRgProfileM1Restricted" => Some(ucf::v1::ReasonCode::RcRgProfileM1Restricted),
             "RcGvDwmReport" | "RC.GV.DWM.REPORT" => Some(ucf::v1::ReasonCode::RcGvDwmReport),
             "RcGvDwmStabilize" | "RC.GV.DWM.STABILIZE" => {
@@ -1851,6 +1945,44 @@ mod tests {
         }
 
         assert_eq!(digests_a, digests_b);
+    }
+
+    #[test]
+    fn stn_policy_pressure_hold_enables_overlays() {
+        let mut frame = base_frame();
+        frame.policy_stats = Some(PolicyStats {
+            deny_count: 10,
+            allow_count: 0,
+            top_reason_codes: Vec::new(),
+        });
+
+        let mut engine = RegulationEngine::default();
+        let control = engine.on_signal_frame(frame, 1);
+        let overlays = control.overlays.unwrap();
+
+        assert!(overlays.simulate_first);
+        assert!(overlays.novelty_lock);
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcGvHoldOn as i32)));
+    }
+
+    #[test]
+    fn pmrf_divergence_split_enables_checkpointing() {
+        let mut frame = base_frame();
+        frame.exec_stats = Some(ExecStats {
+            timeout_count: 5,
+            top_reason_codes: Vec::new(),
+        });
+
+        let control = RegulationEngine::default().on_signal_frame(frame, 1);
+        let overlays = control.overlays.unwrap();
+
+        assert!(overlays.simulate_first);
+        assert!(overlays.chain_tightening);
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcGvSequenceSplitRequired as i32)));
     }
 
     #[test]

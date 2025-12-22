@@ -71,6 +71,9 @@ pub mod v1 {
         RcGvDwmStabilize = 41,
         RcGvDwmSimulate = 42,
         RcGvDwmExecPlan = 43,
+        RcGvHoldOn = 44,
+        RcGvSequenceSplitRequired = 45,
+        RcGvSequenceSlow = 46,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]

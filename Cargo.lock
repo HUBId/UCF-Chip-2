@@ -202,6 +202,8 @@ dependencies = [
  "dbm_9_amygdala",
  "dbm_core",
  "dbm_pag",
+ "dbm_pmrf",
+ "dbm_stn",
  "profiles",
  "prost",
  "pvgs_client",
