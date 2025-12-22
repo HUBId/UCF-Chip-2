@@ -211,6 +211,7 @@ dependencies = [
 name = "engine"
 version = "0.1.0"
 dependencies = [
+ "baseline_resolver",
  "blake3",
  "chip4",
  "dbm_0_sn",

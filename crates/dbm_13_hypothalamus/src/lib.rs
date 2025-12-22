@@ -7,12 +7,10 @@ use dbm_core::{
 #[derive(Debug, Clone, Default)]
 pub struct HypothalamusInput {
     pub isv: IsvSnapshot,
-    pub cbv_offset: i32,
-    pub pev_offset: i32,
-    pub hbv_offset: i32,
-    pub hbv_export_lock_bias: bool,
-    pub hbv_simulate_first_bias: bool,
-    pub hbv_approval_strict: bool,
+    pub export_lock_bias: bool,
+    pub simulate_first_bias: bool,
+    pub approval_strict: bool,
+    pub novelty_lock_bias: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,22 +53,31 @@ impl DbmModule for Hypothalamus {
             ..ControlDecision::default()
         };
 
-        if input.hbv_export_lock_bias {
+        if input.export_lock_bias {
             decision.overlays.export_lock = true;
-            decision.reason_codes.insert("hbv_export_lock".to_string());
+            decision
+                .reason_codes
+                .insert("baseline_export_lock".to_string());
         }
 
-        if input.hbv_simulate_first_bias {
+        if input.simulate_first_bias {
             decision.overlays.simulate_first = true;
             decision
                 .reason_codes
-                .insert("hbv_chain_conservatism".to_string());
+                .insert("baseline_chain_conservatism".to_string());
         }
 
-        if input.hbv_approval_strict {
+        if input.novelty_lock_bias {
+            decision.overlays.novelty_lock = true;
             decision
                 .reason_codes
-                .insert("hbv_approval_strict".to_string());
+                .insert("baseline_novelty_dampening".to_string());
+        }
+
+        if input.approval_strict {
+            decision
+                .reason_codes
+                .insert("baseline_approval_strict".to_string());
         }
 
         if input.isv.integrity == IntegrityState::Fail {

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use baseline_resolver::{resolve_baseline, BaselineInputs, HbvOffsets};
 use blake3::Hasher;
 use dbm_0_sn::{SnInput, SubstantiaNigra};
 use dbm_12_insula::{Insula, InsulaInput};
@@ -10,8 +11,8 @@ use dbm_7_lc::{Lc, LcInput};
 use dbm_8_serotonin::{SerInput, Serotonin};
 use dbm_9_amygdala::{AmyInput, Amygdala};
 use dbm_core::{
-    CooldownClass as BrainCooldown, DbmModule, DwmMode, IntegrityState, IsvSnapshot,
-    LevelClass as BrainLevel, OrientTarget, OverlaySet as BrainOverlay,
+    BaselineVector, CooldownClass as BrainCooldown, DbmModule, DwmMode, IntegrityState,
+    IsvSnapshot, LevelClass as BrainLevel, OrientTarget, OverlaySet as BrainOverlay,
     ProfileState as BrainProfile,
 };
 use dbm_hpa::{Hpa, HpaInput, HpaOutput};
@@ -88,7 +89,7 @@ struct RunSnContext {
     arousal: BrainLevel,
     integrity: IntegrityState,
     now_ms: u64,
-    hbv: HpaOutput,
+    baseline: BaselineVector,
     replay_hint: bool,
     reward_block: bool,
 }
@@ -117,6 +118,7 @@ pub struct RegulationEngine {
     last_dopa_output: Option<DopaOutput>,
     hpa: Hpa,
     last_hpa_output: HpaOutput,
+    last_baseline_vector: BaselineVector,
     emotion_field: EmotionFieldModule,
     last_emotion_field: Option<dbm_core::EmotionField>,
     current_dwm: DwmMode,
@@ -176,6 +178,7 @@ impl Default for RegulationEngine {
                     last_dopa_output: None,
                     hpa,
                     last_hpa_output,
+                    last_baseline_vector: BaselineVector::default(),
                     emotion_field: EmotionFieldModule::new(),
                     last_emotion_field: None,
                     current_dwm: DwmMode::ExecPlan,
@@ -210,6 +213,7 @@ impl Default for RegulationEngine {
                     last_dopa_output: None,
                     hpa,
                     last_hpa_output,
+                    last_baseline_vector: BaselineVector::default(),
                     emotion_field: EmotionFieldModule::new(),
                     last_emotion_field: None,
                     current_dwm: DwmMode::ExecPlan,
@@ -250,6 +254,7 @@ impl RegulationEngine {
             last_dopa_output: None,
             hpa,
             last_hpa_output,
+            last_baseline_vector: BaselineVector::default(),
             emotion_field: EmotionFieldModule::new(),
             last_emotion_field: None,
             current_dwm: DwmMode::ExecPlan,
@@ -388,6 +393,46 @@ impl RegulationEngine {
         self.last_hpa_output.clone()
     }
 
+    fn resolve_baseline_vector(
+        &mut self,
+        classified: &profiles::classification::ClassifiedSignals,
+        hbv_output: &HpaOutput,
+    ) -> BaselineVector {
+        let cbv = self
+            .pvgs_reader
+            .as_ref()
+            .and_then(|reader| reader.get_latest_cbv());
+        let pev = self
+            .pvgs_reader
+            .as_ref()
+            .and_then(|reader| reader.get_latest_pev());
+
+        let hbv = HbvOffsets {
+            baseline_caution_offset: hbv_output.baseline_caution_offset as i32,
+            baseline_novelty_dampening_offset: hbv_output.baseline_novelty_dampening_offset as i32,
+            baseline_approval_strictness_offset: hbv_output.baseline_approval_strictness_offset
+                as i32,
+            baseline_export_strictness_offset: hbv_output.baseline_export_strictness_offset as i32,
+            baseline_chain_conservatism_offset: hbv_output.baseline_chain_conservatism_offset
+                as i32,
+            baseline_cooldown_multiplier_class: hbv_output.baseline_cooldown_multiplier_class
+                as i32,
+            reward_block_bias: None,
+            reason_codes: hbv_output.reason_codes.codes.clone(),
+        };
+
+        let inputs = BaselineInputs {
+            cbv,
+            pev,
+            hbv: Some(hbv),
+            integrity: Some(to_brain_integrity(classified.integrity_state)),
+        };
+
+        let baseline = resolve_baseline(&inputs);
+        self.last_baseline_vector = baseline.clone();
+        baseline
+    }
+
     fn decide_from_frame(
         &mut self,
         mut frame: ucf::v1::SignalFrame,
@@ -408,9 +453,10 @@ impl RegulationEngine {
         }
 
         let hbv_output = self.update_hpa(&classified);
+        let baseline_vector = self.resolve_baseline_vector(&classified, &hbv_output);
 
         let cerebellum_output = self.tick_cerebellum(&frame, &classified);
-        let arousal_floor = if matches!(
+        let mut arousal_floor = if matches!(
             cerebellum_output.as_ref().map(|output| output.divergence),
             Some(BrainLevel::High)
         ) {
@@ -419,13 +465,7 @@ impl RegulationEngine {
             BrainLevel::Low
         };
 
-        let arousal_floor = level_max(arousal_floor, hbv_arousal_floor(&hbv_output));
-
-        let arousal_floor = level_max(arousal_floor, hbv_arousal_floor(&hbv_output));
-
-        let arousal_floor = level_max(arousal_floor, hbv_arousal_floor(&hbv_output));
-
-        let arousal_floor = level_max(arousal_floor, hbv_arousal_floor(&hbv_output));
+        arousal_floor = level_max(arousal_floor, baseline_vector.caution_floor);
 
         let lc_output = self.lc.tick(&LcInput {
             integrity: to_brain_integrity(classified.integrity_state),
@@ -444,10 +484,10 @@ impl RegulationEngine {
             dlp_critical_count_medium: self.counters.medium_dlp_critical_count,
             flapping_count_medium: self.counters.medium_flapping_count,
             unlock_present: self.rsv.unlock_ready,
-            stability_floor: hbv_stability_floor(&hbv_output),
+            stability_floor: baseline_vector.caution_floor,
         });
 
-        let ser_output = apply_hbv_cooldown_bias(ser_output, &hbv_output);
+        let ser_output = apply_baseline_cooldown_bias(ser_output, &baseline_vector);
 
         let amy_output =
             self.amygdala
@@ -474,6 +514,13 @@ impl RegulationEngine {
                 dopa_output = self.dopamin.tick(&input);
                 self.last_dopa_output = Some(dopa_output.clone());
             }
+        }
+
+        if level_at_least(baseline_vector.reward_block_bias, BrainLevel::Med) {
+            dopa_output.reward_block = true;
+            dopa_output
+                .reason_codes
+                .insert("baseline_reward_block".to_string());
         }
 
         let cbv_present = self
@@ -534,14 +581,14 @@ impl RegulationEngine {
                 arousal: lc_output.arousal,
                 integrity: to_brain_integrity(classified.integrity_state),
                 now_ms: timestamp_ms,
-                hbv: hbv_output.clone(),
+                baseline: baseline_vector.clone(),
                 replay_hint: dopa_output.replay_hint,
                 reward_block: dopa_output.reward_block,
             });
         merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
         hypo_decision
             .reason_codes
-            .extend(hbv_output.reason_codes.codes.clone());
+            .extend(baseline_vector.reason_codes.codes.clone());
         hypo_decision
             .reason_codes
             .extend(pprf_output.reason_codes.codes.clone());
@@ -562,6 +609,7 @@ impl RegulationEngine {
         if let Some(output) = &cerebellum_output {
             self.extend_reason_codes(&mut translated, &output.reason_codes);
         }
+        self.extend_reason_codes(&mut translated, &baseline_vector.reason_codes);
 
         translated = self.apply_stn_pmrf_overlays(translated, &stn_output, &pmrf_output);
         translated = self.apply_cerebellum_overlays(translated, &cerebellum_output);
@@ -591,6 +639,7 @@ impl RegulationEngine {
         }
 
         let hbv_output = self.update_hpa(&classified);
+        let baseline_vector = self.resolve_baseline_vector(&classified, &hbv_output);
         let cerebellum_output = self.last_cerebellum_output.clone();
         let arousal_floor = if matches!(
             cerebellum_output.as_ref().map(|output| output.divergence),
@@ -608,7 +657,7 @@ impl RegulationEngine {
             dlp_critical_present_short: self.counters.short_dlp_critical_present,
             timeout_count_short: self.counters.short_timeout_count,
             deny_count_short: self.counters.short_deny_count,
-            arousal_floor,
+            arousal_floor: level_max(arousal_floor, baseline_vector.caution_floor),
         });
 
         let ser_output = self.serotonin.tick(&SerInput {
@@ -618,10 +667,10 @@ impl RegulationEngine {
             dlp_critical_count_medium: self.counters.medium_dlp_critical_count,
             flapping_count_medium: self.counters.medium_flapping_count,
             unlock_present: self.rsv.unlock_ready,
-            stability_floor: hbv_stability_floor(&hbv_output),
+            stability_floor: baseline_vector.caution_floor,
         });
 
-        let ser_output = apply_hbv_cooldown_bias(ser_output, &hbv_output);
+        let ser_output = apply_baseline_cooldown_bias(ser_output, &baseline_vector);
 
         let amy_output =
             self.amygdala
@@ -648,6 +697,13 @@ impl RegulationEngine {
                 dopa_output = self.dopamin.tick(&input);
                 self.last_dopa_output = Some(dopa_output.clone());
             }
+        }
+
+        if level_at_least(baseline_vector.reward_block_bias, BrainLevel::Med) {
+            dopa_output.reward_block = true;
+            dopa_output
+                .reason_codes
+                .insert("baseline_reward_block".to_string());
         }
 
         let insula_input =
@@ -693,14 +749,14 @@ impl RegulationEngine {
                 arousal: lc_output.arousal,
                 integrity: to_brain_integrity(classified.integrity_state),
                 now_ms,
-                hbv: hbv_output.clone(),
+                baseline: baseline_vector.clone(),
                 replay_hint: dopa_output.replay_hint,
                 reward_block: dopa_output.reward_block,
             });
         merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
         hypo_decision
             .reason_codes
-            .extend(hbv_output.reason_codes.codes.clone());
+            .extend(baseline_vector.reason_codes.codes.clone());
         hypo_decision
             .reason_codes
             .extend(pprf_output.reason_codes.codes.clone());
@@ -732,6 +788,7 @@ impl RegulationEngine {
         if let Some(output) = &cerebellum_output {
             self.extend_reason_codes(&mut translated, &output.reason_codes);
         }
+        self.extend_reason_codes(&mut translated, &baseline_vector.reason_codes);
 
         translated = self.apply_stn_pmrf_overlays(translated, &stn_output, &pmrf_output);
         translated = self.apply_cerebellum_overlays(translated, &cerebellum_output);
@@ -792,7 +849,7 @@ impl RegulationEngine {
             arousal,
             integrity,
             now_ms,
-            hbv,
+            baseline,
             replay_hint,
             reward_block,
         } = ctx;
@@ -825,12 +882,10 @@ impl RegulationEngine {
 
         let hypo_input = HypothalamusInput {
             isv,
-            cbv_offset: 0,
-            pev_offset: 0,
-            hbv_offset: 0,
-            hbv_export_lock_bias: hbv.baseline_export_strictness_offset >= 1,
-            hbv_simulate_first_bias: hbv.baseline_chain_conservatism_offset >= 2,
-            hbv_approval_strict: hbv.baseline_approval_strictness_offset >= 1,
+            export_lock_bias: level_at_least(baseline.export_strictness, BrainLevel::Med),
+            simulate_first_bias: level_at_least(baseline.chain_conservatism, BrainLevel::High),
+            approval_strict: level_at_least(baseline.approval_strictness, BrainLevel::Med),
+            novelty_lock_bias: level_at_least(baseline.novelty_dampening, BrainLevel::Med),
         };
 
         let hypo_decision = self.hypothalamus.tick(&hypo_input);
@@ -1185,16 +1240,26 @@ impl RegulationEngine {
             .as_ref()
             .and_then(|reader| reader.get_latest_pev());
 
-        if self.last_hpa_output.baseline_export_strictness_offset >= 1 {
+        if level_at_least(self.last_baseline_vector.export_strictness, BrainLevel::Med) {
             decision.overlays.export_lock = true;
         }
 
-        if self.last_hpa_output.baseline_chain_conservatism_offset >= 2 {
+        if level_at_least(
+            self.last_baseline_vector.chain_conservatism,
+            BrainLevel::High,
+        ) {
             decision.overlays.simulate_first = true;
         }
 
-        if self.last_hpa_output.baseline_approval_strictness_offset >= 1 {
+        if level_at_least(
+            self.last_baseline_vector.approval_strictness,
+            BrainLevel::Med,
+        ) {
             decision.approval_mode = self.config.character_baselines.strict_approval_mode.clone();
+        }
+
+        if level_at_least(self.last_baseline_vector.novelty_dampening, BrainLevel::Med) {
+            decision.overlays.novelty_lock = true;
         }
 
         if cbv_digest.is_some()
@@ -1439,6 +1504,10 @@ fn level_severity(level: BrainLevel) -> u8 {
     }
 }
 
+fn level_at_least(level: BrainLevel, threshold: BrainLevel) -> bool {
+    level_severity(level) >= level_severity(threshold)
+}
+
 fn level_max(a: BrainLevel, b: BrainLevel) -> BrainLevel {
     if level_severity(a) >= level_severity(b) {
         a
@@ -1560,37 +1629,15 @@ fn update_window_counters(
     }
 }
 
-fn hbv_arousal_floor(hbv: &HpaOutput) -> BrainLevel {
-    let offset = hbv
-        .baseline_caution_offset
-        .max(hbv.baseline_novelty_dampening_offset);
-
-    if offset >= 4 {
-        BrainLevel::High
-    } else if offset >= 2 {
-        BrainLevel::Med
-    } else {
-        BrainLevel::Low
-    }
-}
-
-fn hbv_stability_floor(hbv: &HpaOutput) -> BrainLevel {
-    if hbv.allostatic_load_class == BrainLevel::High {
-        BrainLevel::Med
-    } else {
-        BrainLevel::Low
-    }
-}
-
-fn apply_hbv_cooldown_bias(
+fn apply_baseline_cooldown_bias(
     mut ser_output: dbm_8_serotonin::SerOutput,
-    hbv: &HpaOutput,
+    baseline: &BaselineVector,
 ) -> dbm_8_serotonin::SerOutput {
-    if hbv.baseline_cooldown_multiplier_class >= 2 {
+    if matches!(baseline.cooldown_bias, BrainCooldown::Longer) {
         ser_output.cooldown_class = BrainCooldown::Longer;
         ser_output
             .reason_codes
-            .insert("hbv_cooldown_multiplier".to_string());
+            .insert("baseline_cooldown_bias".to_string());
     }
 
     ser_output
@@ -1708,9 +1755,12 @@ fn translate_reason_set(reason_set: &dbm_core::ReasonSet) -> Vec<ucf::v1::Reason
         .iter()
         .filter_map(|reason| match reason.as_str() {
             "integrity_fail" | "ReIntegrityFail" => Some(ucf::v1::ReasonCode::ReIntegrityFail),
+            "integrity_degraded" => Some(ucf::v1::ReasonCode::ReIntegrityDegraded),
             "ReIntegrityDegraded" => Some(ucf::v1::ReasonCode::ReIntegrityDegraded),
-            "policy_pressure_high" | "RcGvPevUpdated" => Some(ucf::v1::ReasonCode::RcGvPevUpdated),
-            "RcGvCbvUpdated" => Some(ucf::v1::ReasonCode::RcGvCbvUpdated),
+            "policy_pressure_high" | "RcGvPevUpdated" | "pev_influence" => {
+                Some(ucf::v1::ReasonCode::RcGvPevUpdated)
+            }
+            "RcGvCbvUpdated" | "cbv_influence" => Some(ucf::v1::ReasonCode::RcGvCbvUpdated),
             "threat_high" | "ThExfilHighConfidence" => {
                 Some(ucf::v1::ReasonCode::ThExfilHighConfidence)
             }
@@ -1747,10 +1797,14 @@ fn translate_reason_set(reason_set: &dbm_core::ReasonSet) -> Vec<ucf::v1::Reason
             "RC.GV.TOOL.SUSPEND_RECOMMENDED" => {
                 Some(ucf::v1::ReasonCode::RcGvToolSuspendRecommended)
             }
-            "RC.GV.PROGRESS.REWARD_BLOCKED" => Some(ucf::v1::ReasonCode::RcGvProgressRewardBlocked),
+            "RC.GV.PROGRESS.REWARD_BLOCKED" | "baseline_reward_block" => {
+                Some(ucf::v1::ReasonCode::RcGvProgressRewardBlocked)
+            }
             "RC.GV.REPLAY.DIMINISHING_RETURNS" => {
                 Some(ucf::v1::ReasonCode::RcGvReplayDiminishingReturns)
             }
+            reason if reason.starts_with("hpa_") => Some(ucf::v1::ReasonCode::RcGvPevUpdated),
+            reason if reason.starts_with("baseline_") => Some(ucf::v1::ReasonCode::RcGvCbvUpdated),
             _ => None,
         })
         .collect();
