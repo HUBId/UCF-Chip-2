@@ -317,10 +317,15 @@ mod tests {
         baseline.add_reason_code("a");
         baseline.add_reason_code("a");
         baseline.extend_reason_codes(
-            ["c", "d", "e", "f", "g", "h", "i", "j"].into_iter().map(String::from),
+            ["c", "d", "e", "f", "g", "h", "i", "j"]
+                .into_iter()
+                .map(String::from),
         );
 
-        assert_eq!(baseline.reason_codes.codes.len(), ReasonSet::DEFAULT_MAX_LEN);
+        assert_eq!(
+            baseline.reason_codes.codes.len(),
+            ReasonSet::DEFAULT_MAX_LEN
+        );
         assert_eq!(
             baseline.reason_codes.codes,
             vec![
