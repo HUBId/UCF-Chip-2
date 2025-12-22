@@ -133,9 +133,11 @@ pub struct IsvSnapshot {
     pub threat: LevelClass,
     pub stability: LevelClass,
     pub policy_pressure: LevelClass,
+    pub progress: LevelClass,
     pub integrity: IntegrityState,
     pub dominant_reason_codes: ReasonSet,
     pub threat_vectors: Option<Vec<ThreatVector>>,
+    pub replay_hint: bool,
 }
 
 impl Default for IsvSnapshot {
@@ -145,9 +147,11 @@ impl Default for IsvSnapshot {
             threat: LevelClass::Low,
             stability: LevelClass::Low,
             policy_pressure: LevelClass::Low,
+            progress: LevelClass::Low,
             integrity: IntegrityState::Ok,
             dominant_reason_codes: ReasonSet::default(),
             threat_vectors: None,
+            replay_hint: false,
         }
     }
 }

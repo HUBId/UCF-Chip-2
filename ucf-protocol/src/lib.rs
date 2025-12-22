@@ -85,6 +85,8 @@ pub mod v1 {
         RcGvFlappingPenalty = 55,
         RcGvDivergenceHigh = 56,
         RcGvToolSuspendRecommended = 57,
+        RcGvProgressRewardBlocked = 58,
+        RcGvReplayDiminishingReturns = 59,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]

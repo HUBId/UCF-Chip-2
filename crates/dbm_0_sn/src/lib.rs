@@ -100,6 +100,20 @@ impl SubstantiaNigra {
             ));
         }
 
+        if isv.replay_hint {
+            let intensity = if isv.progress == LevelClass::High {
+                LevelClass::High
+            } else {
+                LevelClass::Med
+            };
+
+            items.push(SalienceItem::new(
+                SalienceSource::Replay,
+                intensity,
+                isv.dominant_reason_codes.codes.clone(),
+            ));
+        }
+
         let receipt_rcs: Vec<String> = isv
             .dominant_reason_codes
             .codes

@@ -5,6 +5,7 @@ use dbm_0_sn::{SnInput, SubstantiaNigra};
 use dbm_12_insula::{Insula, InsulaInput};
 use dbm_13_hypothalamus::{ControlDecision as HypoDecision, Hypothalamus, HypothalamusInput};
 use dbm_18_cerebellum::{CerInput, CerOutput, Cerebellum};
+use dbm_6_dopamin_nacc::{DopaInput, DopaOutput, DopaminNacc};
 use dbm_7_lc::{Lc, LcInput};
 use dbm_8_serotonin::{SerInput, Serotonin};
 use dbm_9_amygdala::{AmyInput, Amygdala};
@@ -105,6 +106,8 @@ pub struct RegulationEngine {
     pprf: Pprf,
     cerebellum: Cerebellum,
     last_cerebellum_output: Option<CerOutput>,
+    dopamin: DopaminNacc,
+    last_dopa_output: Option<DopaOutput>,
     current_dwm: DwmMode,
     current_target: OrientTarget,
     insula: Insula,
@@ -156,6 +159,8 @@ impl Default for RegulationEngine {
                 pprf: Pprf::new(),
                 cerebellum: Cerebellum::new(),
                 last_cerebellum_output: None,
+                dopamin: DopaminNacc::new(),
+                last_dopa_output: None,
                 current_dwm: DwmMode::ExecPlan,
                 current_target: OrientTarget::Approval,
                 insula: Insula::new(),
@@ -181,6 +186,8 @@ impl Default for RegulationEngine {
                 pprf: Pprf::new(),
                 cerebellum: Cerebellum::new(),
                 last_cerebellum_output: None,
+                dopamin: DopaminNacc::new(),
+                last_dopa_output: None,
                 current_dwm: DwmMode::ExecPlan,
                 current_target: OrientTarget::Approval,
                 insula: Insula::new(),
@@ -212,6 +219,8 @@ impl RegulationEngine {
             pprf: Pprf::new(),
             cerebellum: Cerebellum::new(),
             last_cerebellum_output: None,
+            dopamin: DopaminNacc::new(),
+            last_dopa_output: None,
             current_dwm: DwmMode::ExecPlan,
             current_target: OrientTarget::Approval,
             insula: Insula::new(),
@@ -393,6 +402,26 @@ impl RegulationEngine {
         isv.arousal = level_max(isv.arousal, lc_output.arousal);
         isv.stability = level_max(isv.stability, ser_output.stability);
 
+        let mut dopa_output = self.last_dopa_output.clone().unwrap_or_default();
+        if classified.window_kind == ucf::v1::WindowKind::Medium {
+            if let Some(input) = build_dopa_input(
+                &frame,
+                &classified,
+                &amy_output,
+                &isv,
+                &self.counters,
+                to_brain_level(self.rsv.budget_stress),
+            ) {
+                dopa_output = self.dopamin.tick(&input);
+                self.last_dopa_output = Some(dopa_output.clone());
+            }
+        }
+
+        isv.progress = dopa_output.progress;
+        isv.replay_hint = dopa_output.replay_hint;
+        isv.dominant_reason_codes
+            .extend(dopa_output.reason_codes.codes.clone());
+
         let stn_output = self.stn.tick(&StnInput {
             policy_pressure: isv.policy_pressure,
             arousal: lc_output.arousal,
@@ -430,11 +459,15 @@ impl RegulationEngine {
             &pag_output,
             to_brain_level(classified.policy_pressure_class),
         );
+        hypo_decision
+            .reason_codes
+            .extend(dopa_output.reason_codes.codes.clone());
 
         let mut translated = translate_decision(hypo_decision, &self.config, false);
         self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
         self.extend_reason_codes(&mut translated, &pmrf_output.reason_codes);
         self.extend_reason_codes(&mut translated, &pprf_output.reason_codes);
+        self.extend_reason_codes(&mut translated, &dopa_output.reason_codes);
         if let Some(output) = &cerebellum_output {
             self.extend_reason_codes(&mut translated, &output.reason_codes);
         }
@@ -520,6 +553,26 @@ impl RegulationEngine {
         isv.arousal = level_max(isv.arousal, lc_output.arousal);
         isv.stability = level_max(isv.stability, ser_output.stability);
 
+        let mut dopa_output = self.last_dopa_output.clone().unwrap_or_default();
+        if classified.window_kind == ucf::v1::WindowKind::Medium {
+            if let Some(input) = build_dopa_input(
+                &frame,
+                &classified,
+                &amy_output,
+                &isv,
+                &self.counters,
+                to_brain_level(self.rsv.budget_stress),
+            ) {
+                dopa_output = self.dopamin.tick(&input);
+                self.last_dopa_output = Some(dopa_output.clone());
+            }
+        }
+
+        isv.progress = dopa_output.progress;
+        isv.replay_hint = dopa_output.replay_hint;
+        isv.dominant_reason_codes
+            .extend(dopa_output.reason_codes.codes.clone());
+
         let stn_output = self.stn.tick(&StnInput {
             policy_pressure: isv.policy_pressure,
             arousal: lc_output.arousal,
@@ -561,6 +614,7 @@ impl RegulationEngine {
         self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
         self.extend_reason_codes(&mut translated, &pmrf_output.reason_codes);
         self.extend_reason_codes(&mut translated, &pprf_output.reason_codes);
+        self.extend_reason_codes(&mut translated, &dopa_output.reason_codes);
         if let Some(output) = &cerebellum_output {
             self.extend_reason_codes(&mut translated, &output.reason_codes);
         }
@@ -1139,6 +1193,51 @@ fn build_insula_input(
     }
 }
 
+fn build_dopa_input(
+    frame: &ucf::v1::SignalFrame,
+    classified: &profiles::classification::ClassifiedSignals,
+    amy_output: &dbm_9_amygdala::AmyOutput,
+    isv: &IsvSnapshot,
+    counters: &WindowCounters,
+    budget_stress: BrainLevel,
+) -> Option<DopaInput> {
+    use ucf::v1::WindowKind;
+
+    if classified.window_kind != WindowKind::Medium {
+        return None;
+    }
+
+    let exec_stats = frame.exec_stats.as_ref();
+    let exec_failure_count_medium = exec_stats
+        .map(|stats| {
+            stats
+                .timeout_count
+                .saturating_add(stats.partial_failure_count)
+                .saturating_add(stats.tool_unavailable_count)
+                .saturating_add(stats.dlp_block_count)
+        })
+        .unwrap_or(0);
+    let exec_success_count_medium = frame
+        .policy_stats
+        .as_ref()
+        .map(|stats| stats.allow_count)
+        .unwrap_or(classified.policy_allow_count);
+
+    Some(DopaInput {
+        integrity: to_brain_integrity(classified.integrity_state),
+        threat: amy_output.threat,
+        policy_pressure: isv.policy_pressure,
+        receipt_invalid_present: classified.receipt_invalid_count > 0,
+        dlp_critical_present: counters.medium_dlp_critical_count > 0,
+        replay_mismatch_present: counters.medium_replay_mismatch,
+        exec_success_count_medium,
+        exec_failure_count_medium,
+        deny_count_medium: classified.policy_deny_count,
+        budget_stress,
+        macro_finalized_count_long: 0,
+    })
+}
+
 fn build_amygdala_input(
     frame: &ucf::v1::SignalFrame,
     classified: &profiles::classification::ClassifiedSignals,
@@ -1445,6 +1544,10 @@ fn translate_reason_set(reason_set: &dbm_core::ReasonSet) -> Vec<ucf::v1::Reason
             "RC.GV.TOOL.SUSPEND_RECOMMENDED" => {
                 Some(ucf::v1::ReasonCode::RcGvToolSuspendRecommended)
             }
+            "RC.GV.PROGRESS.REWARD_BLOCKED" => Some(ucf::v1::ReasonCode::RcGvProgressRewardBlocked),
+            "RC.GV.REPLAY.DIMINISHING_RETURNS" => {
+                Some(ucf::v1::ReasonCode::RcGvReplayDiminishingReturns)
+            }
             _ => None,
         })
         .collect();
@@ -1528,6 +1631,20 @@ mod tests {
             timestamp_ms: Some(ts),
             integrity_state: integrity as i32,
             reason_codes,
+            ..base_frame()
+        }
+    }
+
+    fn medium_frame(ts: u64, allow_count: u32, deny_count: u32) -> SignalFrame {
+        SignalFrame {
+            window_kind: WindowKind::Medium as i32,
+            window_index: Some(ts),
+            timestamp_ms: Some(ts),
+            policy_stats: Some(PolicyStats {
+                deny_count,
+                allow_count,
+                top_reason_codes: Vec::new(),
+            }),
             ..base_frame()
         }
     }
@@ -1680,6 +1797,56 @@ mod tests {
             control_a.control_frame_digest,
             control_b.control_frame_digest
         );
+    }
+
+    #[test]
+    fn threat_high_blocks_progress_rewards() {
+        let mut engine = RegulationEngine::default();
+
+        let mut frame = medium_frame(1, 12, 0);
+        frame.integrity_state = IntegrityStateClass::Fail as i32;
+        let control = engine.on_signal_frame(frame, 1);
+
+        let dopa = engine.last_dopa_output.as_ref().unwrap();
+        assert_eq!(dopa.progress, BrainLevel::Med);
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ReasonCode::RcGvProgressRewardBlocked as i32)));
+    }
+
+    #[test]
+    fn stable_successes_raise_progress_when_safe() {
+        let mut engine = RegulationEngine::default();
+
+        for ts in 1..=2 {
+            let frame = medium_frame(ts, 4, 0);
+            let _ = engine.on_signal_frame(frame, ts);
+        }
+
+        let dopa = engine.last_dopa_output.as_ref().unwrap();
+        assert_eq!(dopa.progress, BrainLevel::High);
+        assert!(!dopa.replay_hint);
+    }
+
+    #[test]
+    fn diminishing_returns_emit_replay_hint_and_reason_code() {
+        let mut engine = RegulationEngine::default();
+
+        for ts in 1..=3 {
+            let mut frame = medium_frame(ts, 0, 5);
+            frame.exec_stats.as_mut().unwrap().timeout_count = 1;
+            let control = engine.on_signal_frame(frame, ts);
+            if ts == 3 {
+                assert!(engine
+                    .last_dopa_output
+                    .as_ref()
+                    .map(|out| out.replay_hint)
+                    .unwrap_or(false));
+                assert!(control
+                    .profile_reason_codes
+                    .contains(&(ReasonCode::RcGvReplayDiminishingReturns as i32)));
+            }
+        }
     }
 
     #[test]
