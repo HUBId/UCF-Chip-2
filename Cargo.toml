@@ -23,6 +23,7 @@ members = [
     "crates/dbm_pprf",
     "crates/dbm_18_cerebellum",
     "crates/dbm_hpa",
+    "crates/emotion_field",
 ]
 resolver = "2"
 

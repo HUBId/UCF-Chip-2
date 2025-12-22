@@ -190,6 +190,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "emotion_field"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "dbm_pag",
+]
+
+[[package]]
 name = "engine"
 version = "0.1.0"
 dependencies = [
@@ -208,6 +216,7 @@ dependencies = [
  "dbm_pprf",
  "dbm_sc",
  "dbm_stn",
+ "emotion_field",
  "profiles",
  "prost",
  "pvgs_client",

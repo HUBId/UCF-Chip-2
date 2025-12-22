@@ -20,6 +20,30 @@ pub enum CooldownClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NoiseClass {
+    #[default]
+    Low,
+    Med,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PriorityClass {
+    #[default]
+    Low,
+    Med,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RecursionDepthClass {
+    #[default]
+    Low,
+    Med,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UrgencyClass {
     #[default]
     Low,
@@ -160,6 +184,31 @@ pub struct RsvSnapshot {
     pub policy_pressure: LevelClass,
     pub integrity: IntegrityState,
     pub dominant_reason_codes: ReasonSet,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmotionField {
+    pub noise: NoiseClass,
+    pub priority: PriorityClass,
+    pub recursion_depth: RecursionDepthClass,
+    pub dwm: DwmMode,
+    pub profile: ProfileState,
+    pub overlays: OverlaySet,
+    pub reason_codes: ReasonSet,
+}
+
+impl Default for EmotionField {
+    fn default() -> Self {
+        Self {
+            noise: NoiseClass::Low,
+            priority: PriorityClass::Low,
+            recursion_depth: RecursionDepthClass::High,
+            dwm: DwmMode::ExecPlan,
+            profile: ProfileState::M0,
+            overlays: OverlaySet::default(),
+            reason_codes: ReasonSet::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

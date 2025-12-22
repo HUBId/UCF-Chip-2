@@ -1,0 +1,8 @@
+[package]
+name = "emotion_field"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dbm_core = { path = "../dbm_core" }
+dbm_pag = { path = "../dbm_pag" }

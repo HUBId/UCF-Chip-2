@@ -18,6 +18,7 @@ use dbm_pmrf::{Pmrf, PmrfInput};
 use dbm_pprf::{Pprf, PprfInput};
 use dbm_sc::{Sc, ScInput};
 use dbm_stn::{Stn, StnInput};
+use emotion_field::{EmotionFieldInput, EmotionFieldModule};
 use profiles::{
     apply_cbv_modifiers, apply_classification, apply_pev_modifiers, classify_signal_frame,
     ControlDecision, FlappingPenaltyMode, OverlaySet, ProfileState, RegulationConfig,
@@ -105,6 +106,8 @@ pub struct RegulationEngine {
     pprf: Pprf,
     cerebellum: Cerebellum,
     last_cerebellum_output: Option<CerOutput>,
+    emotion_field: EmotionFieldModule,
+    last_emotion_field: Option<dbm_core::EmotionField>,
     current_dwm: DwmMode,
     current_target: OrientTarget,
     insula: Insula,
@@ -156,6 +159,8 @@ impl Default for RegulationEngine {
                 pprf: Pprf::new(),
                 cerebellum: Cerebellum::new(),
                 last_cerebellum_output: None,
+                emotion_field: EmotionFieldModule::new(),
+                last_emotion_field: None,
                 current_dwm: DwmMode::ExecPlan,
                 current_target: OrientTarget::Approval,
                 insula: Insula::new(),
@@ -181,6 +186,8 @@ impl Default for RegulationEngine {
                 pprf: Pprf::new(),
                 cerebellum: Cerebellum::new(),
                 last_cerebellum_output: None,
+                emotion_field: EmotionFieldModule::new(),
+                last_emotion_field: None,
                 current_dwm: DwmMode::ExecPlan,
                 current_target: OrientTarget::Approval,
                 insula: Insula::new(),
@@ -212,6 +219,8 @@ impl RegulationEngine {
             pprf: Pprf::new(),
             cerebellum: Cerebellum::new(),
             last_cerebellum_output: None,
+            emotion_field: EmotionFieldModule::new(),
+            last_emotion_field: None,
             current_dwm: DwmMode::ExecPlan,
             current_target: OrientTarget::Approval,
             insula: Insula::new(),
@@ -249,6 +258,10 @@ impl RegulationEngine {
             control_frame_digest: digest,
             rsv_summary: self.rsv_summary(),
         }
+    }
+
+    pub fn emotion_field_snapshot(&self) -> Option<dbm_core::EmotionField> {
+        self.last_emotion_field.clone()
     }
 
     pub fn enqueue_signal_frame(&mut self, frame: ucf::v1::SignalFrame) -> Result<(), EngineError> {
@@ -307,6 +320,11 @@ impl RegulationEngine {
         self.rsv.reset_forensic();
         self.anti_flapping_state.current_profile = None;
         self.anti_flapping_state.current_overlays = None;
+    }
+
+    fn update_emotion_field(&mut self, input: EmotionFieldInput) {
+        let field = self.emotion_field.tick(&input);
+        self.last_emotion_field = Some(field);
     }
 
     fn decide_from_frame(
@@ -393,6 +411,8 @@ impl RegulationEngine {
         isv.arousal = level_max(isv.arousal, lc_output.arousal);
         isv.stability = level_max(isv.stability, ser_output.stability);
 
+        let emotion_isv = isv.clone();
+
         let stn_output = self.stn.tick(&StnInput {
             policy_pressure: isv.policy_pressure,
             arousal: lc_output.arousal,
@@ -430,6 +450,16 @@ impl RegulationEngine {
             &pag_output,
             to_brain_level(classified.policy_pressure_class),
         );
+
+        self.update_emotion_field(EmotionFieldInput {
+            isv: emotion_isv,
+            dwm: pprf_output.active_dwm,
+            profile: hypo_decision.profile_state,
+            overlays: hypo_decision.overlays.clone(),
+            reward_block: false,
+            defense_pattern: Some(pag_output.pattern),
+            replay_hint: false,
+        });
 
         let mut translated = translate_decision(hypo_decision, &self.config, false);
         self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
@@ -520,6 +550,8 @@ impl RegulationEngine {
         isv.arousal = level_max(isv.arousal, lc_output.arousal);
         isv.stability = level_max(isv.stability, ser_output.stability);
 
+        let emotion_isv = isv.clone();
+
         let stn_output = self.stn.tick(&StnInput {
             policy_pressure: isv.policy_pressure,
             arousal: lc_output.arousal,
@@ -556,6 +588,16 @@ impl RegulationEngine {
             &pag_output,
             to_brain_level(classified.policy_pressure_class),
         );
+
+        self.update_emotion_field(EmotionFieldInput {
+            isv: emotion_isv,
+            dwm: pprf_output.active_dwm,
+            profile: hypo_decision.profile_state,
+            overlays: hypo_decision.overlays.clone(),
+            reward_block: false,
+            defense_pattern: Some(pag_output.pattern),
+            replay_hint: false,
+        });
 
         let mut translated = translate_decision(hypo_decision, &self.config, true);
         self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
