@@ -6,10 +6,12 @@ use dbm_12_insula::{Insula, InsulaInput};
 use dbm_13_hypothalamus::{ControlDecision as HypoDecision, Hypothalamus, HypothalamusInput};
 use dbm_7_lc::{Lc, LcInput};
 use dbm_8_serotonin::{SerInput, Serotonin};
+use dbm_9_amygdala::{AmyInput, Amygdala};
 use dbm_core::{
     CooldownClass as BrainCooldown, DbmModule, DwmMode, IntegrityState, IsvSnapshot,
     LevelClass as BrainLevel, OverlaySet as BrainOverlay, ProfileState as BrainProfile,
 };
+use dbm_pag::{DefensePattern, Pag, PagInput};
 use profiles::{
     apply_cbv_modifiers, apply_classification, apply_pev_modifiers, classify_signal_frame,
     ControlDecision, FlappingPenaltyMode, OverlaySet, ProfileState, RegulationConfig,
@@ -76,6 +78,8 @@ pub struct RegulationEngine {
     anti_flapping_state: AntiFlappingState,
     lc: Lc,
     serotonin: Serotonin,
+    amygdala: Amygdala,
+    pag: Pag,
     counters: WindowCounters,
     sn: SubstantiaNigra,
     current_dwm: DwmMode,
@@ -118,6 +122,8 @@ impl Default for RegulationEngine {
                 anti_flapping_state: AntiFlappingState::default(),
                 lc: Lc::new(),
                 serotonin: Serotonin::new(),
+                amygdala: Amygdala::new(),
+                pag: Pag::new(),
                 counters: WindowCounters::default(),
                 sn: SubstantiaNigra::new(),
                 current_dwm: DwmMode::ExecPlan,
@@ -134,6 +140,8 @@ impl Default for RegulationEngine {
                 anti_flapping_state: AntiFlappingState::default(),
                 lc: Lc::new(),
                 serotonin: Serotonin::new(),
+                amygdala: Amygdala::new(),
+                pag: Pag::new(),
                 counters: WindowCounters::default(),
                 sn: SubstantiaNigra::new(),
                 current_dwm: DwmMode::ExecPlan,
@@ -156,6 +164,8 @@ impl RegulationEngine {
             anti_flapping_state: AntiFlappingState::default(),
             lc: Lc::new(),
             serotonin: Serotonin::new(),
+            amygdala: Amygdala::new(),
+            pag: Pag::new(),
             counters: WindowCounters::default(),
             sn: SubstantiaNigra::new(),
             current_dwm: DwmMode::ExecPlan,
@@ -290,6 +300,19 @@ impl RegulationEngine {
             stability_floor: BrainLevel::Low,
         });
 
+        let amy_output =
+            self.amygdala
+                .tick(&build_amygdala_input(&frame, &classified, &self.counters));
+        self.rsv.threat = translate_level(amy_output.threat);
+
+        let pag_output = self.pag.tick(&PagInput {
+            integrity: to_brain_integrity(classified.integrity_state),
+            threat: amy_output.threat,
+            vectors: amy_output.vectors.clone(),
+            unlock_present: self.rsv.unlock_ready,
+            stability: ser_output.stability,
+        });
+
         let cbv_present = self
             .pvgs_reader
             .as_ref()
@@ -303,12 +326,23 @@ impl RegulationEngine {
 
         let insula_input = build_insula_input(&frame, &classified, cbv_present, pev_present);
         let mut isv = self.insula.tick(&insula_input);
+        isv.threat = level_max(isv.threat, amy_output.threat);
+        isv.threat_vectors = Some(amy_output.vectors.clone());
+        isv.dominant_reason_codes
+            .extend(amy_output.reason_codes.codes.clone());
+        isv.dominant_reason_codes
+            .extend(pag_output.reason_codes.codes.clone());
         isv.arousal = level_max(isv.arousal, lc_output.arousal);
         isv.stability = level_max(isv.stability, ser_output.stability);
 
         let (sn_output, mut hypo_decision, previous_dwm) =
             self.run_sn_and_hypothalamus(isv, Some(cooldown_to_level(ser_output.cooldown_class)));
         merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
+        apply_defense_pattern(
+            &mut hypo_decision,
+            &pag_output,
+            to_brain_level(classified.policy_pressure_class),
+        );
 
         let mut translated = translate_decision(hypo_decision, &self.config, false);
         self.append_dwm_reason_codes(previous_dwm, sn_output.dwm, &mut translated);
@@ -353,13 +387,37 @@ impl RegulationEngine {
             stability_floor: BrainLevel::Low,
         });
 
+        let amy_output =
+            self.amygdala
+                .tick(&build_amygdala_input(&frame, &classified, &self.counters));
+        self.rsv.threat = translate_level(amy_output.threat);
+
+        let pag_output = self.pag.tick(&PagInput {
+            integrity: to_brain_integrity(classified.integrity_state),
+            threat: amy_output.threat,
+            vectors: amy_output.vectors.clone(),
+            unlock_present: self.rsv.unlock_ready,
+            stability: ser_output.stability,
+        });
+
         let insula_input = build_insula_input(&frame, &classified, false, false);
         let mut isv = self.insula.tick(&insula_input);
+        isv.threat = level_max(isv.threat, amy_output.threat);
+        isv.threat_vectors = Some(amy_output.vectors.clone());
+        isv.dominant_reason_codes
+            .extend(amy_output.reason_codes.codes.clone());
+        isv.dominant_reason_codes
+            .extend(pag_output.reason_codes.codes.clone());
         isv.arousal = level_max(isv.arousal, lc_output.arousal);
         isv.stability = level_max(isv.stability, ser_output.stability);
         let (sn_output, mut hypo_decision, previous_dwm) =
             self.run_sn_and_hypothalamus(isv, Some(cooldown_to_level(ser_output.cooldown_class)));
         merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
+        apply_defense_pattern(
+            &mut hypo_decision,
+            &pag_output,
+            to_brain_level(classified.policy_pressure_class),
+        );
 
         let mut translated = translate_decision(hypo_decision, &self.config, true);
         self.append_dwm_reason_codes(previous_dwm, sn_output.dwm, &mut translated);
@@ -815,6 +873,57 @@ fn build_insula_input(
     }
 }
 
+fn build_amygdala_input(
+    frame: &ucf::v1::SignalFrame,
+    classified: &profiles::classification::ClassifiedSignals,
+    counters: &WindowCounters,
+) -> AmyInput {
+    let (dlp_secret_present, dlp_obfuscation_present, dlp_stegano_present) = dlp_flags(frame);
+
+    AmyInput {
+        integrity: to_brain_integrity(classified.integrity_state),
+        replay_mismatch_present: counters.medium_replay_mismatch,
+        dlp_secret_present,
+        dlp_obfuscation_present,
+        dlp_stegano_present,
+        receipt_invalid_medium: counters.medium_receipt_invalid_count,
+        policy_pressure: to_brain_level(classified.policy_pressure_class),
+        sealed: Some(classified.integrity_state == IntegrityStateClass::Fail),
+    }
+}
+
+fn apply_defense_pattern(
+    decision: &mut HypoDecision,
+    pag_output: &dbm_pag::PagOutput,
+    policy_pressure: BrainLevel,
+) {
+    decision
+        .reason_codes
+        .extend(pag_output.reason_codes.codes.clone());
+
+    match pag_output.pattern {
+        DefensePattern::DP3_FORENSIC => {
+            decision.profile_state = profile_max(decision.profile_state, BrainProfile::M3);
+            decision.overlays.simulate_first = true;
+            decision.overlays.export_lock = true;
+            decision.overlays.novelty_lock = true;
+            decision.deescalation_lock = true;
+        }
+        DefensePattern::DP2_QUARANTINE => {
+            decision.profile_state = profile_max(decision.profile_state, BrainProfile::M2);
+            decision.overlays.simulate_first = true;
+            decision.overlays.export_lock = true;
+            decision.overlays.novelty_lock = true;
+            decision.deescalation_lock = true;
+        }
+        DefensePattern::DP1_FREEZE | DefensePattern::DP4_CONTAINED_CONTINUE => {
+            if policy_pressure == BrainLevel::High {
+                decision.overlays.simulate_first = true;
+            }
+        }
+    }
+}
+
 fn cooldown_to_level(class: BrainCooldown) -> BrainLevel {
     match class {
         BrainCooldown::Base => BrainLevel::Low,
@@ -838,12 +947,52 @@ fn level_max(a: BrainLevel, b: BrainLevel) -> BrainLevel {
     }
 }
 
+fn profile_max(a: BrainProfile, b: BrainProfile) -> BrainProfile {
+    use BrainProfile::*;
+    let severity = |profile: BrainProfile| match profile {
+        M0 => 0,
+        M1 => 1,
+        M2 => 2,
+        M3 => 3,
+    };
+
+    if severity(a) >= severity(b) {
+        a
+    } else {
+        b
+    }
+}
+
 fn convert_reason_codes(codes: &[i32]) -> Vec<String> {
     codes
         .iter()
         .filter_map(|code| ucf::v1::ReasonCode::try_from(*code).ok())
         .map(|code| format!("{:?}", code))
         .collect()
+}
+
+fn dlp_flags(frame: &ucf::v1::SignalFrame) -> (bool, bool, bool) {
+    (
+        frame_has_reason(frame, ReasonCode::RcCdDlpSecretPattern),
+        frame_has_reason(frame, ReasonCode::RcCdDlpObfuscation),
+        frame_has_reason(frame, ReasonCode::RcCdDlpStegano),
+    )
+}
+
+fn frame_has_reason(frame: &ucf::v1::SignalFrame, code: ReasonCode) -> bool {
+    let code = code as i32;
+    frame.reason_codes.contains(&code)
+        || frame.top_reason_codes.contains(&code)
+        || frame
+            .policy_stats
+            .as_ref()
+            .map(|stats| stats.top_reason_codes.contains(&code))
+            .unwrap_or(false)
+        || frame
+            .exec_stats
+            .as_ref()
+            .map(|stats| stats.top_reason_codes.contains(&code))
+            .unwrap_or(false)
 }
 
 fn update_window_counters(
@@ -997,9 +1146,12 @@ fn translate_reason_set(reason_set: &dbm_core::ReasonSet) -> Vec<ucf::v1::Reason
             "threat_high" | "ThExfilHighConfidence" => {
                 Some(ucf::v1::ReasonCode::ThExfilHighConfidence)
             }
+            "ThPolicyProbing" => Some(ucf::v1::ReasonCode::ThPolicyProbing),
             "RcGeExecDispatchBlocked" => Some(ucf::v1::ReasonCode::RcGeExecDispatchBlocked),
             "RcThIntegrityCompromise" => Some(ucf::v1::ReasonCode::RcThIntegrityCompromise),
-            "RcRxActionForensic" => Some(ucf::v1::ReasonCode::RcRxActionForensic),
+            "RcRxActionForensic" | "RC.RX.ACTION.FORENSIC" => {
+                Some(ucf::v1::ReasonCode::RcRxActionForensic)
+            }
             "RcRgProfileM1Restricted" => Some(ucf::v1::ReasonCode::RcRgProfileM1Restricted),
             "RcGvDwmReport" | "RC.GV.DWM.REPORT" => Some(ucf::v1::ReasonCode::RcGvDwmReport),
             "RcGvDwmStabilize" | "RC.GV.DWM.STABILIZE" => {
@@ -1398,16 +1550,25 @@ mod tests {
         let mut reasons = control.profile_reason_codes.clone();
         reasons.sort();
         reasons.dedup();
-        assert_eq!(
-            reasons,
-            vec![
-                ReasonCode::ReIntegrityFail as i32,
-                ReasonCode::RcRxActionForensic as i32,
-                ReasonCode::RcGvDwmReport as i32
-            ]
-        );
+        assert!(reasons.contains(&(ReasonCode::ReIntegrityFail as i32)));
+        assert!(reasons.contains(&(ReasonCode::RcRxActionForensic as i32)));
+        assert!(reasons.contains(&(ReasonCode::RcGvDwmReport as i32)));
         assert_eq!(control.deescalation_lock, Some(true));
         assert_eq!(control.cooldown_class, Some(LevelClass::High as i32));
+    }
+
+    #[test]
+    fn dlp_secret_drives_amygdala_and_pag_to_forensic() {
+        let mut engine = RegulationEngine::default();
+        let mut frame = base_frame();
+        frame.top_reason_codes = vec![ReasonCode::RcCdDlpSecretPattern as i32];
+
+        let control = engine.on_signal_frame(frame, 1);
+        assert_eq!(control.active_profile.unwrap().profile, "M3_FORENSIC");
+        let mut reasons = control.profile_reason_codes.clone();
+        reasons.sort();
+        reasons.dedup();
+        assert!(reasons.contains(&(ReasonCode::RcRxActionForensic as i32)));
     }
 
     #[test]
@@ -1426,6 +1587,25 @@ mod tests {
             control_second.active_profile.unwrap().profile,
             "M3_FORENSIC"
         );
+    }
+
+    #[test]
+    fn policy_pressure_high_uses_contained_continue() {
+        let mut engine = RegulationEngine::default();
+        let mut frame = base_frame();
+        frame.policy_stats = Some(PolicyStats {
+            deny_count: 5,
+            allow_count: 0,
+            top_reason_codes: Vec::new(),
+        });
+
+        let control = engine.on_signal_frame(frame, 1);
+        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
+        assert!(control
+            .overlays
+            .as_ref()
+            .map(|o| o.simulate_first)
+            .unwrap_or(false));
     }
 
     #[test]

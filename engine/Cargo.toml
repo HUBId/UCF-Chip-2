@@ -17,6 +17,8 @@ dbm_13_hypothalamus = { path = "../crates/dbm_13_hypothalamus" }
 dbm_0_sn = { path = "../crates/dbm_0_sn" }
 dbm_7_lc = { path = "../crates/dbm_7_lc" }
 dbm_8_serotonin = { path = "../crates/dbm_8_serotonin" }
+dbm_9_amygdala = { path = "../crates/dbm_9_amygdala" }
+dbm_pag = { path = "../crates/dbm_pag" }
 
 [dev-dependencies]
 pvgs_client = { path = "../pvgs_client", features = ["local-pvgs"] }
