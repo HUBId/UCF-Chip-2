@@ -8,6 +8,21 @@ members = [
     "pvgs_client",
     "app",
     "ucf-protocol", "chip4",
+    "crates/dbm_core",
+    "crates/dbm_13_hypothalamus",
+    "crates/dbm_12_insula",
+    "crates/dbm_0_sn",
+    "crates/dbm_7_lc",
+    "crates/dbm_8_serotonin",
+    "crates/dbm_6_dopamin_nacc",
+    "crates/dbm_9_amygdala",
+    "crates/dbm_pag",
+    "crates/dbm_stn",
+    "crates/dbm_pmrf",
+    "crates/dbm_sc",
+    "crates/dbm_pprf",
+    "crates/dbm_18_cerebellum",
+    "crates/dbm_hpa",
 ]
 resolver = "2"
 

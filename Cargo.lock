@@ -81,6 +81,108 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
+name = "dbm_0_sn"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_12_insula"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_13_hypothalamus"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_18_cerebellum"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_6_dopamin_nacc"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_7_lc"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_8_serotonin"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_9_amygdala"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_core"
+version = "0.1.0"
+
+[[package]]
+name = "dbm_hpa"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_pag"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_pmrf"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_pprf"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_sc"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "dbm_stn"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
