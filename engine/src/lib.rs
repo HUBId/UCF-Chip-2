@@ -9,10 +9,13 @@ use dbm_8_serotonin::{SerInput, Serotonin};
 use dbm_9_amygdala::{AmyInput, Amygdala};
 use dbm_core::{
     CooldownClass as BrainCooldown, DbmModule, DwmMode, IntegrityState, IsvSnapshot,
-    LevelClass as BrainLevel, OverlaySet as BrainOverlay, ProfileState as BrainProfile,
+    LevelClass as BrainLevel, OrientTarget, OverlaySet as BrainOverlay,
+    ProfileState as BrainProfile,
 };
 use dbm_pag::{DefensePattern, Pag, PagInput};
 use dbm_pmrf::{Pmrf, PmrfInput};
+use dbm_pprf::{Pprf, PprfInput};
+use dbm_sc::{Sc, ScInput};
 use dbm_stn::{Stn, StnInput};
 use profiles::{
     apply_cbv_modifiers, apply_classification, apply_pev_modifiers, classify_signal_frame,
@@ -70,6 +73,17 @@ struct WindowCounters {
     medium_replay_mismatch: bool,
 }
 
+#[derive(Debug)]
+struct RunSnContext {
+    isv: IsvSnapshot,
+    cooldown: Option<BrainLevel>,
+    cooldown_class: BrainCooldown,
+    stability: BrainLevel,
+    arousal: BrainLevel,
+    integrity: IntegrityState,
+    now_ms: u64,
+}
+
 pub struct RegulationEngine {
     pub rsv: RsvState,
     config: RegulationConfig,
@@ -86,7 +100,10 @@ pub struct RegulationEngine {
     pmrf: Pmrf,
     counters: WindowCounters,
     sn: SubstantiaNigra,
+    sc: Sc,
+    pprf: Pprf,
     current_dwm: DwmMode,
+    current_target: OrientTarget,
     insula: Insula,
     hypothalamus: Hypothalamus,
 }
@@ -132,7 +149,10 @@ impl Default for RegulationEngine {
                 pmrf: Pmrf::new(),
                 counters: WindowCounters::default(),
                 sn: SubstantiaNigra::new(),
+                sc: Sc::new(),
+                pprf: Pprf::new(),
                 current_dwm: DwmMode::ExecPlan,
+                current_target: OrientTarget::Approval,
                 insula: Insula::new(),
                 hypothalamus: Hypothalamus::new(),
             },
@@ -152,7 +172,10 @@ impl Default for RegulationEngine {
                 pmrf: Pmrf::new(),
                 counters: WindowCounters::default(),
                 sn: SubstantiaNigra::new(),
+                sc: Sc::new(),
+                pprf: Pprf::new(),
                 current_dwm: DwmMode::ExecPlan,
+                current_target: OrientTarget::Approval,
                 insula: Insula::new(),
                 hypothalamus: Hypothalamus::new(),
             },
@@ -178,7 +201,10 @@ impl RegulationEngine {
             pmrf: Pmrf::new(),
             counters: WindowCounters::default(),
             sn: SubstantiaNigra::new(),
+            sc: Sc::new(),
+            pprf: Pprf::new(),
             current_dwm: DwmMode::ExecPlan,
+            current_target: OrientTarget::Approval,
             insula: Insula::new(),
             hypothalamus: Hypothalamus::new(),
         }
@@ -289,6 +315,9 @@ impl RegulationEngine {
         self.rsv.update_unlock_state(&frame);
 
         update_window_counters(&mut self.counters, &classified);
+        if classified.window_kind == ucf::v1::WindowKind::Medium {
+            self.pprf.on_medium_window_rollover();
+        }
 
         let lc_output = self.lc.tick(&LcInput {
             integrity: to_brain_integrity(classified.integrity_state),
@@ -362,9 +391,21 @@ impl RegulationEngine {
             budget_stress: to_brain_level(self.rsv.budget_stress),
         });
 
-        let (sn_output, mut hypo_decision, previous_dwm) =
-            self.run_sn_and_hypothalamus(isv, Some(cooldown_to_level(ser_output.cooldown_class)));
+        let cooldown_level = Some(cooldown_to_level(ser_output.cooldown_class));
+        let (sn_output, pprf_output, mut hypo_decision, previous_dwm) = self
+            .run_sn_sc_and_hypothalamus(RunSnContext {
+                isv,
+                cooldown: cooldown_level,
+                cooldown_class: ser_output.cooldown_class,
+                stability: ser_output.stability,
+                arousal: lc_output.arousal,
+                integrity: to_brain_integrity(classified.integrity_state),
+                now_ms: timestamp_ms,
+            });
         merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
+        hypo_decision
+            .reason_codes
+            .extend(pprf_output.reason_codes.codes.clone());
         apply_defense_pattern(
             &mut hypo_decision,
             &pag_output,
@@ -374,8 +415,9 @@ impl RegulationEngine {
         let mut translated = translate_decision(hypo_decision, &self.config, false);
         self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
         self.extend_reason_codes(&mut translated, &pmrf_output.reason_codes);
+        self.extend_reason_codes(&mut translated, &pprf_output.reason_codes);
         translated = self.apply_stn_pmrf_overlays(translated, &stn_output, &pmrf_output);
-        self.append_dwm_reason_codes(previous_dwm, sn_output.dwm, &mut translated);
+        self.append_dwm_reason_codes(previous_dwm, pprf_output.active_dwm, &mut translated);
         translated
     }
 
@@ -396,6 +438,9 @@ impl RegulationEngine {
             reason_codes: Vec::new(),
         };
         update_window_counters(&mut self.counters, &classified);
+        if classified.window_kind == ucf::v1::WindowKind::Medium {
+            self.pprf.on_medium_window_rollover();
+        }
 
         let lc_output = self.lc.tick(&LcInput {
             integrity: to_brain_integrity(classified.integrity_state),
@@ -457,9 +502,21 @@ impl RegulationEngine {
             hold_active: stn_output.hold_active,
             budget_stress: to_brain_level(self.rsv.budget_stress),
         });
-        let (sn_output, mut hypo_decision, previous_dwm) =
-            self.run_sn_and_hypothalamus(isv, Some(cooldown_to_level(ser_output.cooldown_class)));
+        let cooldown_level = Some(cooldown_to_level(ser_output.cooldown_class));
+        let (sn_output, pprf_output, mut hypo_decision, previous_dwm) = self
+            .run_sn_sc_and_hypothalamus(RunSnContext {
+                isv,
+                cooldown: cooldown_level,
+                cooldown_class: ser_output.cooldown_class,
+                stability: ser_output.stability,
+                arousal: lc_output.arousal,
+                integrity: to_brain_integrity(classified.integrity_state),
+                now_ms,
+            });
         merge_secondary_outputs(&mut hypo_decision, &lc_output, &ser_output, &sn_output);
+        hypo_decision
+            .reason_codes
+            .extend(pprf_output.reason_codes.codes.clone());
         apply_defense_pattern(
             &mut hypo_decision,
             &pag_output,
@@ -469,8 +526,9 @@ impl RegulationEngine {
         let mut translated = translate_decision(hypo_decision, &self.config, true);
         self.extend_reason_codes(&mut translated, &stn_output.hold_reason_codes);
         self.extend_reason_codes(&mut translated, &pmrf_output.reason_codes);
+        self.extend_reason_codes(&mut translated, &pprf_output.reason_codes);
         translated = self.apply_stn_pmrf_overlays(translated, &stn_output, &pmrf_output);
-        self.append_dwm_reason_codes(previous_dwm, sn_output.dwm, &mut translated);
+        self.append_dwm_reason_codes(previous_dwm, pprf_output.active_dwm, &mut translated);
         translated
     }
 
@@ -480,16 +538,47 @@ impl RegulationEngine {
         self.render_control_frame(decision)
     }
 
-    fn run_sn_and_hypothalamus(
+    fn run_sn_sc_and_hypothalamus(
         &mut self,
-        isv: IsvSnapshot,
-        cooldown: Option<BrainLevel>,
-    ) -> (dbm_0_sn::SnOutput, HypoDecision, DwmMode) {
+        ctx: RunSnContext,
+    ) -> (
+        dbm_0_sn::SnOutput,
+        dbm_pprf::PprfOutput,
+        HypoDecision,
+        DwmMode,
+    ) {
+        let RunSnContext {
+            isv,
+            cooldown,
+            cooldown_class,
+            stability,
+            arousal,
+            integrity,
+            now_ms,
+        } = ctx;
         let previous_dwm = self.current_dwm;
         let sn_output = self.sn.tick(&SnInput {
             isv: isv.clone(),
             cooldown_class: cooldown,
             current_dwm: Some(previous_dwm),
+        });
+
+        let sc_output = self.sc.tick(&ScInput {
+            isv: isv.clone(),
+            salience_items: sn_output.salience_items.clone(),
+            unlock_present: self.rsv.unlock_ready,
+            replay_planned_present: false,
+            integrity,
+        });
+
+        let pprf_output = self.pprf.tick(&PprfInput {
+            orient: sc_output,
+            current_target: self.current_target,
+            current_dwm: sn_output.dwm,
+            cooldown_class,
+            stability,
+            arousal,
+            now_ms,
         });
 
         let hypo_input = HypothalamusInput {
@@ -500,9 +589,10 @@ impl RegulationEngine {
         };
 
         let hypo_decision = self.hypothalamus.tick(&hypo_input);
-        self.current_dwm = sn_output.dwm;
+        self.current_dwm = pprf_output.active_dwm;
+        self.current_target = pprf_output.active_target;
 
-        (sn_output, hypo_decision, previous_dwm)
+        (sn_output, pprf_output, hypo_decision, previous_dwm)
     }
 
     fn append_dwm_reason_codes(
@@ -1253,6 +1343,19 @@ fn translate_reason_set(reason_set: &dbm_core::ReasonSet) -> Vec<ucf::v1::Reason
             }
             "RcGvDwmSimulate" | "RC.GV.DWM.SIMULATE" => Some(ucf::v1::ReasonCode::RcGvDwmSimulate),
             "RcGvDwmExecPlan" | "RC.GV.DWM.EXEC_PLAN" => Some(ucf::v1::ReasonCode::RcGvDwmExecPlan),
+            "RC.GV.ORIENT.TARGET_INTEGRITY" => Some(ucf::v1::ReasonCode::RcGvOrientTargetIntegrity),
+            "RC.GV.ORIENT.TARGET_DLP" => Some(ucf::v1::ReasonCode::RcGvOrientTargetDlp),
+            "RC.GV.ORIENT.TARGET_RECOVERY" => Some(ucf::v1::ReasonCode::RcGvOrientTargetRecovery),
+            "RC.GV.ORIENT.TARGET_APPROVAL" => Some(ucf::v1::ReasonCode::RcGvOrientTargetApproval),
+            "RC.GV.ORIENT.TARGET_REPLAY" => Some(ucf::v1::ReasonCode::RcGvOrientTargetReplay),
+            "RC.GV.ORIENT.TARGET_POLICY_PRESSURE" => {
+                Some(ucf::v1::ReasonCode::RcGvOrientTargetPolicyPressure)
+            }
+            "RC.GV.FOCUS_SHIFT.EXECUTED" => Some(ucf::v1::ReasonCode::RcGvFocusShiftExecuted),
+            "RC.GV.FOCUS_SHIFT.BLOCKED_BY_LOCK" => {
+                Some(ucf::v1::ReasonCode::RcGvFocusShiftBlockedByLock)
+            }
+            "RC.GV.FLAPPING.PENALTY" => Some(ucf::v1::ReasonCode::RcGvFlappingPenalty),
             _ => None,
         })
         .collect();
@@ -1362,14 +1465,67 @@ mod tests {
 
     #[test]
     fn digest_is_deterministic() {
-        let mut engine = RegulationEngine::default();
+        let mut engine_a = RegulationEngine::default();
+        let mut engine_b = RegulationEngine::default();
         let frame = base_frame();
-        let control_a = engine.on_signal_frame(frame.clone(), 1);
-        let control_b = engine.on_signal_frame(frame, 1);
+        let control_a = engine_a.on_signal_frame(frame.clone(), 1);
+        let control_b = engine_b.on_signal_frame(frame, 1);
         assert_eq!(
             control_a.control_frame_digest,
             control_b.control_frame_digest
         );
+    }
+
+    #[test]
+    fn integrity_failure_drives_focus_lock_and_blocks_looser_shift() {
+        let mut engine = RegulationEngine::default();
+
+        let mut integrity_frame = base_frame();
+        integrity_frame.integrity_state = IntegrityStateClass::Fail as i32;
+        integrity_frame.timestamp_ms = Some(1);
+
+        let control_integrity = engine.on_signal_frame(integrity_frame, 1);
+
+        assert_eq!(engine.current_target, OrientTarget::Integrity);
+        assert_eq!(engine.current_dwm, DwmMode::Report);
+        assert!(engine.pprf.lock_until_ms > 1);
+        assert!(control_integrity
+            .profile_reason_codes
+            .contains(&(ucf::v1::ReasonCode::RcGvOrientTargetIntegrity as i32)));
+
+        let mut calm_frame = base_frame();
+        calm_frame.timestamp_ms = Some(2);
+        let control_blocked = engine.on_signal_frame(calm_frame, 2);
+
+        assert_eq!(engine.current_target, OrientTarget::Integrity);
+        assert!(control_blocked
+            .profile_reason_codes
+            .contains(&(ucf::v1::ReasonCode::RcGvFocusShiftBlockedByLock as i32)));
+    }
+
+    #[test]
+    fn stricter_target_preempts_existing_lock() {
+        let mut engine = RegulationEngine::default();
+
+        let mut initial_frame = base_frame();
+        initial_frame.timestamp_ms = Some(10);
+        let _ = engine.on_signal_frame(initial_frame, 10);
+
+        let initial_lock = engine.pprf.lock_until_ms;
+        assert!(initial_lock > 10);
+        assert_eq!(engine.current_target, OrientTarget::Approval);
+
+        let mut integrity_frame = base_frame();
+        integrity_frame.integrity_state = IntegrityStateClass::Fail as i32;
+        integrity_frame.timestamp_ms = Some(11);
+        let control = engine.on_signal_frame(integrity_frame, 11);
+
+        assert_eq!(engine.current_target, OrientTarget::Integrity);
+        assert_eq!(engine.current_dwm, DwmMode::Report);
+        assert!(engine.pprf.lock_until_ms > initial_lock);
+        assert!(control
+            .profile_reason_codes
+            .contains(&(ucf::v1::ReasonCode::RcGvFocusShiftExecuted as i32)));
     }
 
     #[test]

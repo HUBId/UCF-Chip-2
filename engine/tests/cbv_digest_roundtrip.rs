@@ -68,13 +68,16 @@ fn cbv_digest_roundtrip_in_control_frame() {
 #[test]
 fn control_frame_stable_when_local_cbv_absent() {
     let store = InMemoryPvgs::new();
-    let reader = LocalPvgsReader::new(store);
-    let mut engine = RegulationEngine::default();
-    engine.set_pvgs_reader(reader);
+    let reader_a = LocalPvgsReader::new(store.clone());
+    let reader_b = LocalPvgsReader::new(store);
+    let mut engine_a = RegulationEngine::default();
+    let mut engine_b = RegulationEngine::default();
+    engine_a.set_pvgs_reader(reader_a);
+    engine_b.set_pvgs_reader(reader_b);
 
     let frame = base_frame();
-    let control_a = engine.on_signal_frame(frame.clone(), 1);
-    let control_b = engine.on_signal_frame(frame, 1);
+    let control_a = engine_a.on_signal_frame(frame.clone(), 1);
+    let control_b = engine_b.on_signal_frame(frame, 1);
 
     assert!(control_a.character_epoch_digest.is_none());
     assert_eq!(

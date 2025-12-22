@@ -74,6 +74,15 @@ pub mod v1 {
         RcGvHoldOn = 44,
         RcGvSequenceSplitRequired = 45,
         RcGvSequenceSlow = 46,
+        RcGvOrientTargetIntegrity = 47,
+        RcGvOrientTargetDlp = 48,
+        RcGvOrientTargetRecovery = 49,
+        RcGvOrientTargetApproval = 50,
+        RcGvOrientTargetReplay = 51,
+        RcGvOrientTargetPolicyPressure = 52,
+        RcGvFocusShiftExecuted = 53,
+        RcGvFocusShiftBlockedByLock = 54,
+        RcGvFlappingPenalty = 55,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]

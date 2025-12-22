@@ -21,6 +21,8 @@ dbm_9_amygdala = { path = "../crates/dbm_9_amygdala" }
 dbm_pag = { path = "../crates/dbm_pag" }
 dbm_stn = { path = "../crates/dbm_stn" }
 dbm_pmrf = { path = "../crates/dbm_pmrf" }
+dbm_sc = { path = "../crates/dbm_sc" }
+dbm_pprf = { path = "../crates/dbm_pprf" }
 
 [dev-dependencies]
 pvgs_client = { path = "../pvgs_client", features = ["local-pvgs"] }

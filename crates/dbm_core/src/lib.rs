@@ -20,6 +20,14 @@ pub enum CooldownClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UrgencyClass {
+    #[default]
+    Low,
+    Med,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntegrityState {
     #[default]
     Ok,
@@ -27,9 +35,21 @@ pub enum IntegrityState {
     Fail,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OrientTarget {
+    Integrity,
+    Dlp,
+    Recovery,
+    #[default]
+    Approval,
+    Replay,
+    PolicyPressure,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DwmMode {
     Simulate,
+    #[default]
     ExecPlan,
     Stabilize,
     Report,
