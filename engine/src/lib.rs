@@ -5,7 +5,7 @@ use dbm_0_sn::{SnInput, SubstantiaNigra};
 use dbm_12_insula::{Insula, InsulaInput};
 use dbm_13_hypothalamus::{ControlDecision as HypoDecision, Hypothalamus, HypothalamusInput};
 use dbm_18_cerebellum::{CerInput, CerOutput, Cerebellum};
-use dbm_6_dopamin_nacc::DopaminNacc;
+use dbm_6_dopamin_nacc::{DopaOutput, DopaminNacc};
 use dbm_7_lc::{Lc, LcInput};
 use dbm_8_serotonin::{SerInput, Serotonin};
 use dbm_9_amygdala::{AmyInput, Amygdala};
@@ -85,11 +85,6 @@ struct RunSnContext {
     arousal: BrainLevel,
     integrity: IntegrityState,
     now_ms: u64,
-}
-
-#[derive(Debug, Clone, Default)]
-struct DopaOutput {
-    reward_block: bool,
 }
 
 pub struct RegulationEngine {
@@ -403,8 +398,7 @@ impl RegulationEngine {
             stability: ser_output.stability,
         });
 
-        let dopa_output = self.last_dopa_output.clone().unwrap_or_default();
-        self.dopamin.tick();
+        let dopa_output = self.dopamin.tick();
         self.last_dopa_output = Some(dopa_output.clone());
 
         let cbv_present = self
@@ -557,8 +551,7 @@ impl RegulationEngine {
             stability: ser_output.stability,
         });
 
-        let dopa_output = self.last_dopa_output.clone().unwrap_or_default();
-        self.dopamin.tick();
+        let dopa_output = self.dopamin.tick();
         self.last_dopa_output = Some(dopa_output.clone());
 
         let insula_input = build_insula_input(&frame, &classified, false, false);

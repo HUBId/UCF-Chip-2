@@ -2,6 +2,11 @@
 
 use dbm_core::{DbmComponent, DwmMode, IntegrityState};
 
+#[derive(Debug, Clone, Default)]
+pub struct DopaOutput {
+    pub reward_block: bool,
+}
+
 #[derive(Debug, Default)]
 pub struct DopaminNacc {}
 
@@ -10,8 +15,9 @@ impl DopaminNacc {
         Self {}
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> DopaOutput {
         // TODO: replace with module-specific processing once available.
+        DopaOutput::default()
     }
 }
 
