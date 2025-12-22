@@ -13,6 +13,13 @@ pub enum LevelClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CooldownClass {
+    #[default]
+    Base,
+    Longer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntegrityState {
     #[default]
     Ok,
