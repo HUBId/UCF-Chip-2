@@ -2,17 +2,12 @@
 
 use dbm_core::{DbmModule, LevelClass, ReasonSet};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SequenceMode {
+    #[default]
     Normal,
     Slow,
     SplitRequired,
-}
-
-impl Default for SequenceMode {
-    fn default() -> Self {
-        SequenceMode::Normal
-    }
 }
 
 #[derive(Debug, Clone, Default)]
