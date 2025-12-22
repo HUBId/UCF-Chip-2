@@ -5,8 +5,8 @@ use engine::RegulationEngine;
 use pvgs_client::MockPvgsReader;
 use std::time::{SystemTime, UNIX_EPOCH};
 use ucf::v1::{
-    ExecStats, IntegrityStateClass, PolicyStats, ReasonCode, ReceiptStats, SignalFrame,
-    WindowKind, PolicyEcologyVector, CharacterBaselineVector,
+    CharacterBaselineVector, ExecStats, IntegrityStateClass, PolicyEcologyVector, PolicyStats,
+    ReasonCode, ReceiptStats, SignalFrame, WindowKind,
 };
 
 fn medium_frame() -> SignalFrame {
@@ -185,6 +185,12 @@ fn identical_frames_produce_deterministic_control_and_digest() {
     assert!(reason_codes_a.contains(&(ReasonCode::RcGvPevUpdated as i32)));
     assert!(reason_codes_a.contains(&(ReasonCode::RcGvProgressRewardBlocked as i32)));
 
-    assert_eq!(control_a.control_frame_digest, control_b.control_frame_digest);
-    assert_eq!(control_a.profile_reason_codes, control_b.profile_reason_codes);
+    assert_eq!(
+        control_a.control_frame_digest,
+        control_b.control_frame_digest
+    );
+    assert_eq!(
+        control_a.profile_reason_codes,
+        control_b.profile_reason_codes
+    );
 }
