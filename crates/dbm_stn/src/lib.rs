@@ -12,25 +12,13 @@ pub struct StnInput {
     pub integrity: IntegrityState,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StnOutput {
     pub hold_active: bool,
     pub hold_reason_codes: ReasonSet,
     pub hint_simulate_first: bool,
     pub hint_novelty_lock: bool,
     pub hint_export_lock: bool,
-}
-
-impl Default for StnOutput {
-    fn default() -> Self {
-        Self {
-            hold_active: false,
-            hold_reason_codes: ReasonSet::default(),
-            hint_simulate_first: false,
-            hint_novelty_lock: false,
-            hint_export_lock: false,
-        }
-    }
 }
 
 #[derive(Debug, Default)]
