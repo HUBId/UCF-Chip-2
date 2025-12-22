@@ -126,8 +126,8 @@ impl DbmModule for Cerebellum {
         output.side_effect_suspected = divergence == LevelClass::High
             && (input.tool_unavailable_count_medium > 0 || input.partial_failure_count_medium > 0);
 
-        output.suspend_recommended = (divergence == LevelClass::High && self.cooldown_windows >= 2)
-            || (per_tool_count >= 3 && divergence == LevelClass::High);
+        output.suspend_recommended = divergence == LevelClass::High
+            && (self.cooldown_windows >= 2 || per_tool_count >= 3);
 
         if output.suspend_recommended {
             output.reason_codes.insert("RC.GV.TOOL.SUSPEND_RECOMMENDED");
