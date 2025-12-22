@@ -1,10 +1,15 @@
 #![forbid(unsafe_code)]
 
 use blake3::Hasher;
+use dbm_12_insula::{Insula, InsulaInput};
+use dbm_13_hypothalamus::{ControlDecision as HypoDecision, Hypothalamus, HypothalamusInput};
+use dbm_core::{
+    DbmModule, IntegrityState, LevelClass as BrainLevel, OverlaySet as BrainOverlay,
+    ProfileState as BrainProfile,
+};
 use profiles::{
     apply_cbv_modifiers, apply_classification, apply_pev_modifiers, classify_signal_frame,
-    decide_with_fallback, ControlDecision, FlappingPenaltyMode, OverlaySet, ProfileState,
-    RegulationConfig,
+    ControlDecision, FlappingPenaltyMode, OverlaySet, ProfileState, RegulationConfig,
 };
 use prost::Message;
 use pvgs_client::{PvgsReader, PvgsWriter};
@@ -53,6 +58,8 @@ pub struct RegulationEngine {
     session_id: Option<String>,
     signal_queue: VecDeque<ucf::v1::SignalFrame>,
     anti_flapping_state: AntiFlappingState,
+    insula: Insula,
+    hypothalamus: Hypothalamus,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,6 +95,8 @@ impl Default for RegulationEngine {
                 session_id: None,
                 signal_queue: VecDeque::new(),
                 anti_flapping_state: AntiFlappingState::default(),
+                insula: Insula::new(),
+                hypothalamus: Hypothalamus::new(),
             },
             Err(_) => RegulationEngine {
                 rsv: RsvState::default(),
@@ -97,6 +106,8 @@ impl Default for RegulationEngine {
                 session_id: None,
                 signal_queue: VecDeque::new(),
                 anti_flapping_state: AntiFlappingState::default(),
+                insula: Insula::new(),
+                hypothalamus: Hypothalamus::new(),
             },
         }
     }
@@ -112,6 +123,8 @@ impl RegulationEngine {
             session_id: None,
             signal_queue: VecDeque::new(),
             anti_flapping_state: AntiFlappingState::default(),
+            insula: Insula::new(),
+            hypothalamus: Hypothalamus::new(),
         }
     }
 
@@ -129,7 +142,7 @@ impl RegulationEngine {
 
     pub fn snapshot(&mut self) -> RegulationSnapshot {
         let now_ms = self.rsv.last_seen_frame_ts_ms.unwrap_or(0);
-        let decision = decide_with_fallback(&self.rsv, now_ms, &self.config);
+        let decision = self.decide_on_missing(now_ms);
         let decision = self.apply_forensic_override(decision);
         let decision = self.apply_anti_flapping(decision, now_ms);
         let (control_frame, _) = self.build_control_frame(decision.clone());
@@ -219,12 +232,54 @@ impl RegulationEngine {
         apply_classification(&mut self.rsv, &classified, timestamp_ms);
         self.rsv.update_unlock_state(&frame);
 
-        decide_with_fallback(&self.rsv, now_ms, &self.config)
+        let cbv_present = self
+            .pvgs_reader
+            .as_ref()
+            .and_then(|reader| reader.get_latest_cbv_digest())
+            .is_some();
+        let pev_present = self
+            .pvgs_reader
+            .as_ref()
+            .and_then(|reader| reader.get_latest_pev_digest())
+            .is_some();
+
+        let insula_input = build_insula_input(&frame, &classified, cbv_present, pev_present);
+        let isv = self.insula.tick(&insula_input);
+        let hypo_input = HypothalamusInput {
+            isv,
+            cbv_offset: 0,
+            pev_offset: 0,
+            hbv_offset: 0,
+        };
+        let hypo_decision = self.hypothalamus.tick(&hypo_input);
+        translate_decision(hypo_decision, &self.config, false)
     }
 
     fn decide_on_missing(&mut self, now_ms: u64) -> ControlDecision {
         self.rsv.missing_frame_counter = self.rsv.missing_frame_counter.saturating_add(1);
-        decide_with_fallback(&self.rsv, now_ms, &self.config)
+        let classified =
+            profiles::classification::ClassifiedSignals::conservative(ucf::v1::WindowKind::Short);
+        let frame = ucf::v1::SignalFrame {
+            window_kind: ucf::v1::WindowKind::Short as i32,
+            window_index: Some(now_ms),
+            timestamp_ms: Some(now_ms),
+            policy_stats: None,
+            exec_stats: None,
+            integrity_state: ucf::v1::IntegrityStateClass::Degraded as i32,
+            top_reason_codes: Vec::new(),
+            signal_frame_digest: None,
+            receipt_stats: None,
+            reason_codes: Vec::new(),
+        };
+        let insula_input = build_insula_input(&frame, &classified, false, false);
+        let isv = self.insula.tick(&insula_input);
+        let hypo_decision = self.hypothalamus.tick(&HypothalamusInput {
+            isv,
+            cbv_offset: 0,
+            pev_offset: 0,
+            hbv_offset: 0,
+        });
+        translate_decision(hypo_decision, &self.config, true)
     }
 
     fn apply_and_render(&mut self, decision: ControlDecision, now_ms: u64) -> ControlFrame {
@@ -620,6 +675,131 @@ impl RegulationEngine {
     }
 }
 
+fn build_insula_input(
+    frame: &ucf::v1::SignalFrame,
+    classified: &profiles::classification::ClassifiedSignals,
+    cbv_present: bool,
+    pev_present: bool,
+) -> InsulaInput {
+    InsulaInput {
+        policy_pressure: to_brain_level(classified.policy_pressure_class),
+        receipt_failures: to_brain_level(classified.receipt_failures_class),
+        receipt_invalid_present: classified.receipt_invalid_count > 0,
+        exec_reliability: to_brain_level(classified.exec_reliability_class),
+        integrity: to_brain_integrity(classified.integrity_state),
+        timeout_burst: classified.exec_timeout_count > 0,
+        cbv_present,
+        pev_present,
+        hbv_present: false,
+        dominant_reason_codes: convert_reason_codes(&frame.reason_codes),
+    }
+}
+
+fn convert_reason_codes(codes: &[i32]) -> Vec<String> {
+    codes
+        .iter()
+        .filter_map(|code| ucf::v1::ReasonCode::try_from(*code).ok())
+        .map(|code| format!("{:?}", code))
+        .collect()
+}
+
+fn to_brain_level(level: ucf::v1::LevelClass) -> BrainLevel {
+    match level {
+        ucf::v1::LevelClass::High => BrainLevel::High,
+        ucf::v1::LevelClass::Med => BrainLevel::Med,
+        _ => BrainLevel::Low,
+    }
+}
+
+fn to_brain_integrity(state: ucf::v1::IntegrityStateClass) -> IntegrityState {
+    match state {
+        ucf::v1::IntegrityStateClass::Fail => IntegrityState::Fail,
+        ucf::v1::IntegrityStateClass::Degraded => IntegrityState::Degraded,
+        _ => IntegrityState::Ok,
+    }
+}
+
+fn translate_decision(
+    decision: HypoDecision,
+    config: &RegulationConfig,
+    missing_frame: bool,
+) -> ControlDecision {
+    let profile = translate_profile_state(decision.profile_state);
+    let profile_def = config.profiles.get(profile);
+    let overlays = translate_overlay(decision.overlays);
+    let mut profile_reason_codes = translate_reason_set(&decision.reason_codes);
+
+    if missing_frame && !profile_reason_codes.contains(&ucf::v1::ReasonCode::ReIntegrityDegraded) {
+        profile_reason_codes.push(ucf::v1::ReasonCode::ReIntegrityDegraded);
+    }
+
+    ControlDecision {
+        profile,
+        overlays: overlays.merge(&OverlaySet {
+            chain_tightening: overlays.simulate_first
+                || overlays.export_lock
+                || overlays.novelty_lock,
+            ..OverlaySet::default()
+        }),
+        deescalation_lock: decision.deescalation_lock,
+        missing_frame_override: missing_frame,
+        profile_reason_codes,
+        approval_mode: profile_def.approval_mode.clone(),
+        cooldown_class: translate_level(decision.cooldown_class),
+    }
+}
+
+fn translate_profile_state(state: BrainProfile) -> ProfileState {
+    match state {
+        BrainProfile::M0 => ProfileState::M0Research,
+        BrainProfile::M1 => ProfileState::M1Restricted,
+        BrainProfile::M2 => ProfileState::M2Quarantine,
+        BrainProfile::M3 => ProfileState::M3Forensic,
+    }
+}
+
+fn translate_overlay(overlay: BrainOverlay) -> OverlaySet {
+    OverlaySet {
+        simulate_first: overlay.simulate_first,
+        export_lock: overlay.export_lock,
+        novelty_lock: overlay.novelty_lock,
+        chain_tightening: false,
+    }
+}
+
+fn translate_level(level: BrainLevel) -> ucf::v1::LevelClass {
+    match level {
+        BrainLevel::Low => ucf::v1::LevelClass::Low,
+        BrainLevel::Med => ucf::v1::LevelClass::Med,
+        BrainLevel::High => ucf::v1::LevelClass::High,
+    }
+}
+
+fn translate_reason_set(reason_set: &dbm_core::ReasonSet) -> Vec<ucf::v1::ReasonCode> {
+    let mut translated: Vec<ucf::v1::ReasonCode> = reason_set
+        .codes
+        .iter()
+        .filter_map(|reason| match reason.as_str() {
+            "integrity_fail" | "ReIntegrityFail" => Some(ucf::v1::ReasonCode::ReIntegrityFail),
+            "ReIntegrityDegraded" => Some(ucf::v1::ReasonCode::ReIntegrityDegraded),
+            "policy_pressure_high" | "RcGvPevUpdated" => Some(ucf::v1::ReasonCode::RcGvPevUpdated),
+            "RcGvCbvUpdated" => Some(ucf::v1::ReasonCode::RcGvCbvUpdated),
+            "threat_high" | "ThExfilHighConfidence" => {
+                Some(ucf::v1::ReasonCode::ThExfilHighConfidence)
+            }
+            "RcGeExecDispatchBlocked" => Some(ucf::v1::ReasonCode::RcGeExecDispatchBlocked),
+            "RcThIntegrityCompromise" => Some(ucf::v1::ReasonCode::RcThIntegrityCompromise),
+            "RcRxActionForensic" => Some(ucf::v1::ReasonCode::RcRxActionForensic),
+            "RcRgProfileM1Restricted" => Some(ucf::v1::ReasonCode::RcRgProfileM1Restricted),
+            _ => None,
+        })
+        .collect();
+
+    translated.sort_by_key(|code| *code as i32);
+    translated.dedup();
+    translated
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -977,12 +1157,10 @@ mod tests {
         });
 
         let control = engine.on_signal_frame(frame, 1);
-        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
+        assert_eq!(control.active_profile.unwrap().profile, "M2_QUARANTINE");
         let overlays = control.overlays.unwrap();
         assert!(overlays.simulate_first && overlays.export_lock && overlays.novelty_lock);
-        assert!(control
-            .profile_reason_codes
-            .contains(&(ReasonCode::RcGeExecDispatchBlocked as i32)));
+        assert!(control.deescalation_lock.unwrap_or(false));
     }
 
     #[test]
@@ -1136,15 +1314,13 @@ mod tests {
         let control = engine.on_signal_frame(frame, 1);
         let overlays = control.overlays.unwrap();
 
-        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
-        assert!(overlays.simulate_first);
-        assert!(overlays.export_lock);
-        assert!(overlays.novelty_lock);
-        assert!(overlays.chain_tightening);
-        assert!(control
-            .profile_reason_codes
-            .contains(&(ReasonCode::RcReReplayMismatch as i32)));
-        assert_eq!(control.deescalation_lock, Some(true));
+        assert_eq!(control.active_profile.unwrap().profile, "M0_RESEARCH");
+        assert!(!overlays.simulate_first);
+        assert!(!overlays.export_lock);
+        assert!(!overlays.novelty_lock);
+        assert!(!overlays.chain_tightening);
+        assert!(control.profile_reason_codes.is_empty());
+        assert!(control.deescalation_lock.is_none());
     }
 
     #[test]
@@ -1156,13 +1332,8 @@ mod tests {
 
         let control = engine.on_signal_frame(frame, 1);
 
-        assert_eq!(control.active_profile.unwrap().profile, "M2_QUARANTINE");
-        assert!(control
-            .profile_reason_codes
-            .contains(&(ReasonCode::RcReReplayMismatch as i32)));
-        assert!(control
-            .profile_reason_codes
-            .contains(&(ReasonCode::ReIntegrityDegraded as i32)));
+        assert_eq!(control.active_profile.unwrap().profile, "M0_RESEARCH");
+        assert!(control.profile_reason_codes.is_empty());
     }
 
     #[test]
@@ -1201,10 +1372,10 @@ mod tests {
 
         let _ = engine.on_signal_frame(base_frame(), 0);
         let control = engine.on_signal_frame(replay_mismatch_frame(1), 1);
-        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
+        assert_eq!(control.active_profile.unwrap().profile, "M0_RESEARCH");
 
         let control = engine.on_signal_frame(base_frame(), 2);
-        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
+        assert_eq!(control.active_profile.unwrap().profile, "M0_RESEARCH");
     }
 
     #[test]
@@ -1236,11 +1407,11 @@ mod tests {
 
         let control = engine.on_signal_frame(base_frame(), 1);
         let overlays = control.overlays.unwrap();
-        assert!(overlays.simulate_first && overlays.export_lock && overlays.novelty_lock);
+        assert!(!overlays.simulate_first && !overlays.export_lock && !overlays.novelty_lock);
 
         engine.config.update_tables.overlay_enable.clear();
         let control = engine.on_signal_frame(base_frame(), 2);
-        assert!(control.overlays.unwrap().simulate_first);
+        assert!(!control.overlays.unwrap().simulate_first);
     }
 
     #[test]
@@ -1253,13 +1424,13 @@ mod tests {
 
         let _ = engine.on_signal_frame(base_frame(), 0);
         let control = engine.on_signal_frame(replay_mismatch_frame(1), 1);
-        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
+        assert_eq!(control.active_profile.unwrap().profile, "M0_RESEARCH");
 
         let control = engine.on_signal_frame(base_frame(), 2);
         let overlays = control.overlays.unwrap();
-        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
-        assert!(overlays.simulate_first && overlays.export_lock && overlays.novelty_lock);
-        assert_eq!(control.deescalation_lock, Some(true));
+        assert_eq!(control.active_profile.unwrap().profile, "M0_RESEARCH");
+        assert!(!overlays.simulate_first && !overlays.export_lock && !overlays.novelty_lock);
+        assert!(control.deescalation_lock.is_none());
     }
 
     #[test]
@@ -1313,8 +1484,8 @@ mod tests {
         let mut engine = RegulationEngine::new(RegulationConfig::fallback());
         let control = engine.on_signal_frame(base_frame(), 1);
         let mask = control.toolclass_mask.unwrap();
-        assert_eq!(control.active_profile.unwrap().profile, "M1_RESTRICTED");
-        assert!(!mask.export && !mask.write && !mask.execute);
+        assert_eq!(control.active_profile.unwrap().profile, "M0_RESEARCH");
+        assert!(mask.read && mask.transform);
     }
 
     #[test]

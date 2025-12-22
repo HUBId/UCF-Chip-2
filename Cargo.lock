@@ -194,6 +194,9 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "chip4",
+ "dbm_12_insula",
+ "dbm_13_hypothalamus",
+ "dbm_core",
  "profiles",
  "prost",
  "pvgs_client",

@@ -1,31 +1,26 @@
 #![forbid(unsafe_code)]
 
-//! Platzhalter-Typen und Traits für DBM-Komponenten.
+//! Kern-Typen und Traits für deterministische DBM-Komponenten.
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use std::cmp::Ordering;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LevelClass {
+    #[default]
     Low,
     Med,
     High,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntegrityState {
+    #[default]
     Ok,
     Degraded,
     Fail,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ThreatVector {
-    Exfil,
-    Probing,
-    Integrity,
-    Availability,
-    Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DwmMode {
     Simulate,
     ExecPlan,
@@ -33,20 +28,138 @@ pub enum DwmMode {
     Report,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ReasonCodeSet {
-    pub codes: Vec<String>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreatVector {
+    Exfil,
+    Probing,
+    IntegrityCompromise,
+    RuntimeEscape,
+    ToolSideEffects,
 }
 
-impl ReasonCodeSet {
-    pub fn new(codes: Vec<String>) -> Self {
-        // TODO: enforce bounds and sorting once business rules are defined.
-        Self { codes }
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OverlaySet {
+    pub simulate_first: bool,
+    pub export_lock: bool,
+    pub novelty_lock: bool,
+}
+
+impl OverlaySet {
+    pub fn all_enabled() -> Self {
+        Self {
+            simulate_first: true,
+            export_lock: true,
+            novelty_lock: true,
+        }
     }
 }
 
-/// Trait-Platzhalter für DBM-Komponenten.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileState {
+    M0,
+    M1,
+    M2,
+    M3,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IsvSnapshot {
+    pub arousal: LevelClass,
+    pub threat: LevelClass,
+    pub stability: LevelClass,
+    pub policy_pressure: LevelClass,
+    pub integrity: IntegrityState,
+    pub dominant_reason_codes: ReasonSet,
+    pub threat_vectors: Option<Vec<ThreatVector>>,
+}
+
+impl Default for IsvSnapshot {
+    fn default() -> Self {
+        Self {
+            arousal: LevelClass::Low,
+            threat: LevelClass::Low,
+            stability: LevelClass::Low,
+            policy_pressure: LevelClass::Low,
+            integrity: IntegrityState::Ok,
+            dominant_reason_codes: ReasonSet::default(),
+            threat_vectors: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RsvSnapshot {
+    pub arousal: LevelClass,
+    pub threat: LevelClass,
+    pub stability: LevelClass,
+    pub policy_pressure: LevelClass,
+    pub integrity: IntegrityState,
+    pub dominant_reason_codes: ReasonSet,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReasonSet {
+    pub codes: Vec<String>,
+    max_len: usize,
+}
+
+impl ReasonSet {
+    pub const DEFAULT_MAX_LEN: usize = 8;
+
+    pub fn new(max_len: usize) -> Self {
+        Self {
+            codes: Vec::new(),
+            max_len,
+        }
+    }
+
+    pub fn insert(&mut self, code: impl Into<String>) {
+        self.codes.push(code.into());
+        self.normalize();
+    }
+
+    pub fn extend<I: IntoIterator<Item = String>>(&mut self, iter: I) {
+        self.codes.extend(iter);
+        self.normalize();
+    }
+
+    fn normalize(&mut self) {
+        self.codes.sort_by(|a, b| {
+            let ord = a.cmp(b);
+            if ord == Ordering::Equal {
+                Ordering::Equal
+            } else {
+                ord
+            }
+        });
+        self.codes.dedup();
+        if self.codes.len() > self.max_len {
+            self.codes.truncate(self.max_len);
+        }
+    }
+}
+
+impl Default for ReasonSet {
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_MAX_LEN)
+    }
+}
+
+/// Gemeinsames Trait für deterministische DBM-Module.
+pub trait DbmModule {
+    type Input;
+    type Output;
+
+    fn tick(&mut self, input: &Self::Input) -> Self::Output;
+}
+
+/// Abwärtskompatibles Alias für Legacy-Module.
 pub trait DbmComponent {
-    fn mode(&self) -> DwmMode;
-    fn integrity(&self) -> IntegrityState;
+    fn mode(&self) -> DwmMode {
+        DwmMode::Simulate
+    }
+
+    fn integrity(&self) -> IntegrityState {
+        IntegrityState::Ok
+    }
 }

@@ -11,6 +11,9 @@ blake3 = "1"
 prost = "0.12"
 ucf = { package = "ucf-protocol", path = "../ucf-protocol" }
 pvgs_client = { path = "../pvgs_client" }
+dbm_core = { path = "../crates/dbm_core" }
+dbm_12_insula = { path = "../crates/dbm_12_insula" }
+dbm_13_hypothalamus = { path = "../crates/dbm_13_hypothalamus" }
 
 [dev-dependencies]
 pvgs_client = { path = "../pvgs_client", features = ["local-pvgs"] }
