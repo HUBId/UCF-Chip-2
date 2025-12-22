@@ -1005,7 +1005,7 @@ mod tests {
             control.profile_reason_codes,
             vec![
                 ReasonCode::ReIntegrityFail as i32,
-                ReasonCode::RcRxActionForensic as i32
+                ReasonCode::RcRxActionForensic as i32,
             ]
         );
         assert_eq!(control.deescalation_lock, Some(true));
