@@ -29,6 +29,8 @@ pub trait MicrocircuitBackend<I, O> {
     fn step(&mut self, input: &I, now_ms: u64) -> O;
 
     fn snapshot_digest(&self) -> [u8; 32];
+
+    fn config_digest(&self) -> [u8; 32];
 }
 
 pub fn digest_meta(domain: &str, bytes: &[u8]) -> [u8; 32] {
@@ -36,6 +38,15 @@ pub fn digest_meta(domain: &str, bytes: &[u8]) -> [u8; 32] {
     hasher.update(domain.as_bytes());
     hasher.update(bytes);
     *hasher.finalize().as_bytes()
+}
+
+pub fn digest_config(domain: &str, config: &CircuitConfig) -> [u8; 32] {
+    let mut bytes = Vec::new();
+    bytes.extend(config.version.to_le_bytes());
+    bytes.extend(config.seed.to_le_bytes());
+    bytes.extend(config.max_neurons.to_le_bytes());
+
+    digest_meta(domain, &bytes)
 }
 
 #[cfg(test)]

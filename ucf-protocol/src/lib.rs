@@ -97,6 +97,14 @@ pub mod v1 {
         DecreaseStrictness = 2,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
+    #[repr(i32)]
+    pub enum MicrocircuitModule {
+        Unknown = 0,
+        Lc = 1,
+        Sn = 2,
+    }
+
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
     pub struct TraitUpdate {
         #[prost(string, tag = "1")]
@@ -151,6 +159,32 @@ pub mod v1 {
         pub manipulation_aversion_bias: i32,
         #[prost(int32, tag = "4")]
         pub reversibility_bias: i32,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct MicrocircuitConfigEvidence {
+        #[prost(enumeration = "MicrocircuitModule", tag = "1")]
+        pub module: i32,
+        #[prost(uint32, tag = "2")]
+        pub config_version: u32,
+        #[prost(bytes, tag = "3")]
+        pub config_digest: ::prost::alloc::vec::Vec<u8>,
+        #[prost(uint64, tag = "4")]
+        pub created_at_ms: u64,
+        #[prost(bytes, optional, tag = "5")]
+        pub prev_config_digest: Option<::prost::alloc::vec::Vec<u8>>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct MicrocircuitConfigAppend {
+        #[prost(message, optional, tag = "1")]
+        pub evidence: Option<MicrocircuitConfigEvidence>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct PvgsReceipt {
+        #[prost(bytes, tag = "1")]
+        pub receipt: ::prost::alloc::vec::Vec<u8>,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]

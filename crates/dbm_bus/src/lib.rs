@@ -133,6 +133,14 @@ impl BrainBus {
         &mut self.sn
     }
 
+    pub fn lc_config_digest(&self) -> Option<[u8; 32]> {
+        self.lc.config_digest()
+    }
+
+    pub fn sn_config_digest(&self) -> Option<[u8; 32]> {
+        self.sn.config_digest()
+    }
+
     pub fn sc_mut(&mut self) -> &mut Sc {
         &mut self.sc
     }

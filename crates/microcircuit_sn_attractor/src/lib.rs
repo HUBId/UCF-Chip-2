@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use dbm_core::{DwmMode, IntegrityState, LevelClass, ReasonSet, SalienceItem, SalienceSource};
-use microcircuit_core::{digest_meta, CircuitConfig, MicrocircuitBackend};
+use microcircuit_core::{digest_config, digest_meta, CircuitConfig, MicrocircuitBackend};
 use microcircuit_sn_stub::{SnInput, SnOutput};
 
 const SCORE_MIN: i32 = -100;
@@ -262,6 +262,10 @@ impl MicrocircuitBackend<SnInput, SnOutput> for SnAttractorMicrocircuit {
         bytes.extend(self.config.version.to_le_bytes());
 
         digest_meta("UCF:MC:SN", &bytes)
+    }
+
+    fn config_digest(&self) -> [u8; 32] {
+        digest_config("UCF:MC:SN:ATTRACTOR:CONFIG", &self.config)
     }
 }
 

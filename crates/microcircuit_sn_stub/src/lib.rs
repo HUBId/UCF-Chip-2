@@ -3,7 +3,9 @@
 use dbm_core::{
     DbmModule, DwmMode, IntegrityState, LevelClass, ReasonSet, SalienceItem, SalienceSource,
 };
-use microcircuit_core::{digest_meta, CircuitConfig, CircuitStateMeta, MicrocircuitBackend};
+use microcircuit_core::{
+    digest_config, digest_meta, CircuitConfig, CircuitStateMeta, MicrocircuitBackend,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct SnInput {
@@ -225,6 +227,10 @@ impl MicrocircuitBackend<SnInput, SnOutput> for SnMicrocircuit {
         bytes.extend(self.meta.step_count.to_le_bytes());
 
         digest_meta("sn_stub", &bytes)
+    }
+
+    fn config_digest(&self) -> [u8; 32] {
+        digest_config("sn_stub_config", &self.config)
     }
 }
 

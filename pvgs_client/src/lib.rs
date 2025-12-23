@@ -3,11 +3,13 @@
 #[cfg(any(test, feature = "local-pvgs"))]
 pub mod local;
 #[cfg(any(test, feature = "local-pvgs"))]
-pub use local::LocalPvgsReader;
+pub use local::{LocalPvgsReader, LocalPvgsWriter};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use ucf::v1::{CharacterBaselineVector, PolicyEcologyVector};
+use ucf::v1::{
+    CharacterBaselineVector, MicrocircuitConfigEvidence, PolicyEcologyVector, PvgsReceipt,
+};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct PvgsClientConfig {
@@ -55,6 +57,11 @@ pub trait PvgsWriter: Send {
         session_id: &str,
         control_frame_digest: [u8; 32],
     ) -> Result<(), PvgsError>;
+
+    fn commit_microcircuit_config(
+        &mut self,
+        evidence: MicrocircuitConfigEvidence,
+    ) -> Result<PvgsReceipt, PvgsError>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -125,6 +132,7 @@ impl PvgsReader for MockPvgsReader {
 #[derive(Debug, Default)]
 pub struct MockPvgsWriter {
     pub committed: Vec<(String, [u8; 32])>,
+    pub committed_microcircuit_configs: Vec<MicrocircuitConfigEvidence>,
     pub fail_with: Option<String>,
 }
 
@@ -132,6 +140,7 @@ impl MockPvgsWriter {
     pub fn failing(reason: impl Into<String>) -> Self {
         Self {
             committed: Vec::new(),
+            committed_microcircuit_configs: Vec::new(),
             fail_with: Some(reason.into()),
         }
     }
@@ -153,6 +162,20 @@ impl PvgsWriter for MockPvgsWriter {
             .push((session_id.to_string(), control_frame_digest));
         Ok(())
     }
+
+    fn commit_microcircuit_config(
+        &mut self,
+        evidence: MicrocircuitConfigEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        if let Some(reason) = &self.fail_with {
+            return Err(PvgsError::CommitFailed {
+                reason: reason.clone(),
+            });
+        }
+
+        self.committed_microcircuit_configs.push(evidence);
+        Ok(PvgsReceipt::default())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -170,6 +193,13 @@ impl PvgsWriter for PlaceholderPvgsClient {
         _session_id: &str,
         _control_frame_digest: [u8; 32],
     ) -> Result<(), PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_microcircuit_config(
+        &mut self,
+        _evidence: MicrocircuitConfigEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }
 }
@@ -215,6 +245,23 @@ mod tests {
         assert_eq!(writer.committed.len(), 1);
         assert_eq!(writer.committed[0].0, "session-1");
         assert_eq!(writer.committed[0].1, digest);
+    }
+
+    #[test]
+    fn mock_writer_records_microcircuit_commit() {
+        let mut writer = MockPvgsWriter::default();
+        let evidence = ucf::v1::MicrocircuitConfigEvidence {
+            module: ucf::v1::MicrocircuitModule::Lc as i32,
+            config_version: 1,
+            config_digest: vec![1; 32],
+            created_at_ms: 10,
+            prev_config_digest: None,
+        };
+
+        writer.commit_microcircuit_config(evidence.clone()).unwrap();
+
+        assert_eq!(writer.committed_microcircuit_configs.len(), 1);
+        assert_eq!(writer.committed_microcircuit_configs[0], evidence);
     }
 
     #[test]
