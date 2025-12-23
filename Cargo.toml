@@ -25,6 +25,7 @@ members = [
     "crates/dbm_hpa",
     "crates/emotion_field",
     "crates/baseline_resolver",
+    "crates/dbm_bus",
 ]
 resolver = "2"
 

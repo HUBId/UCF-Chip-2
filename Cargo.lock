@@ -145,6 +145,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "dbm_bus"
+version = "0.1.0"
+dependencies = [
+ "baseline_resolver",
+ "dbm_0_sn",
+ "dbm_12_insula",
+ "dbm_13_hypothalamus",
+ "dbm_18_cerebellum",
+ "dbm_6_dopamin_nacc",
+ "dbm_7_lc",
+ "dbm_8_serotonin",
+ "dbm_9_amygdala",
+ "dbm_core",
+ "dbm_hpa",
+ "dbm_pag",
+ "dbm_pmrf",
+ "dbm_pprf",
+ "dbm_sc",
+ "dbm_stn",
+ "emotion_field",
+ "ucf-protocol",
+]
+
+[[package]]
 name = "dbm_core"
 version = "0.1.0"
 

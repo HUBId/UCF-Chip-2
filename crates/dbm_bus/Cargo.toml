@@ -1,0 +1,24 @@
+[package]
+name = "dbm_bus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dbm_core = { path = "../dbm_core" }
+dbm_hpa = { path = "../dbm_hpa" }
+baseline_resolver = { path = "../baseline_resolver" }
+dbm_7_lc = { path = "../dbm_7_lc" }
+dbm_8_serotonin = { path = "../dbm_8_serotonin" }
+dbm_9_amygdala = { path = "../dbm_9_amygdala" }
+dbm_pag = { path = "../dbm_pag" }
+dbm_18_cerebellum = { path = "../dbm_18_cerebellum" }
+dbm_stn = { path = "../dbm_stn" }
+dbm_pmrf = { path = "../dbm_pmrf" }
+dbm_6_dopamin_nacc = { path = "../dbm_6_dopamin_nacc" }
+dbm_12_insula = { path = "../dbm_12_insula" }
+dbm_0_sn = { path = "../dbm_0_sn" }
+dbm_sc = { path = "../dbm_sc" }
+dbm_pprf = { path = "../dbm_pprf" }
+dbm_13_hypothalamus = { path = "../dbm_13_hypothalamus" }
+emotion_field = { path = "../emotion_field" }
+ucf = { package = "ucf-protocol", path = "../../ucf-protocol" }
