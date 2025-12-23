@@ -7,10 +7,10 @@ edition = "2021"
 path = "src/lib.rs"
 
 [features]
-microcircuit-amygdala-pop = ["dep:microcircuit_amygdala_pop", "dep:microcircuit_core"]
+microcircuit-amygdala-pop = ["dep:microcircuit_amygdala_pop"]
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_amygdala_stub = { path = "../microcircuit_amygdala_stub" }
 microcircuit_amygdala_pop = { path = "../microcircuit_amygdala_pop", optional = true }
-microcircuit_core = { path = "../microcircuit_core", optional = true }
+microcircuit_core = { path = "../microcircuit_core" }
