@@ -94,6 +94,7 @@ version = "0.1.0"
 dependencies = [
  "dbm_core",
  "microcircuit_core",
+ "microcircuit_sn_attractor",
  "microcircuit_sn_stub",
 ]
 
@@ -359,6 +360,15 @@ version = "0.1.0"
 dependencies = [
  "dbm_core",
  "microcircuit_core",
+]
+
+[[package]]
+name = "microcircuit_sn_attractor"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_sn_stub",
 ]
 
 [[package]]

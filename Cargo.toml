@@ -28,6 +28,7 @@ members = [
     "crates/dbm_bus",
     "crates/microcircuit_core",
     "crates/microcircuit_sn_stub",
+    "crates/microcircuit_sn_attractor",
     "crates/microcircuit_lc_stub",
     "crates/microcircuit_lc_spike",
 ]
