@@ -10,8 +10,9 @@ use dbm_7_lc::{Lc, LcInput};
 use dbm_8_serotonin::{SerInput, Serotonin};
 use dbm_9_amygdala::{AmyInput, Amygdala};
 use dbm_core::{
-    BaselineVector, CooldownClass, DbmModule, DwmMode, EmotionField, IsvSnapshot, LevelClass,
-    OrientTarget, ProfileState, ReasonSet, SalienceItem, SuspendRecommendation, ThreatVector,
+    limits::MAX_EVIDENCE_REFS, BaselineVector, CooldownClass, DbmModule, DwmMode, EmotionField,
+    EvidenceKind, EvidenceRef, IsvSnapshot, LevelClass, OrientTarget, ProfileState, ReasonSet,
+    SalienceItem, SuspendRecommendation, ThreatVector,
 };
 use dbm_hpa::{Hpa, HpaInput, HpaOutput};
 use dbm_pag::{DefensePattern, Pag, PagInput};
@@ -57,6 +58,7 @@ pub struct BrainOutput {
     pub isv: IsvSnapshot,
     pub reason_codes: Vec<String>,
     pub suspend_recommendations: Vec<SuspendRecommendation>,
+    pub evidence_refs: Vec<EvidenceRef>,
 }
 
 #[derive(Debug, Default)]
@@ -457,6 +459,23 @@ impl BrainBus {
             sn_output.reason_codes.codes.clone(),
         ]);
 
+        let mut evidence_refs = Vec::new();
+        if let Some(digest) = self.lc.snapshot_digest() {
+            evidence_refs.push(EvidenceRef {
+                kind: EvidenceKind::LcMicroSnapshot,
+                digest,
+            });
+        }
+        if let Some(digest) = self.sn.snapshot_digest() {
+            evidence_refs.push(EvidenceRef {
+                kind: EvidenceKind::SnMicroSnapshot,
+                digest,
+            });
+        }
+        if evidence_refs.len() > MAX_EVIDENCE_REFS {
+            evidence_refs.truncate(MAX_EVIDENCE_REFS);
+        }
+
         let suspend_recommendations = cerebellum_output
             .as_ref()
             .map(|output| output.suspend_recommendations.clone())
@@ -475,6 +494,7 @@ impl BrainBus {
             isv: isv_snapshot,
             reason_codes,
             suspend_recommendations,
+            evidence_refs,
         }
     }
 

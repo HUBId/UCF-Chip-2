@@ -111,6 +111,13 @@ impl Lc {
             backend: LcBackend::Micro(Box::new(LcMicrocircuit::new(config))),
         }
     }
+
+    pub fn snapshot_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            LcBackend::Micro(backend) => Some(backend.snapshot_digest()),
+            LcBackend::Rules(_) => None,
+        }
+    }
 }
 
 impl Default for Lc {

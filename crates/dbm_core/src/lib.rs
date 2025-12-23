@@ -129,6 +129,21 @@ pub enum ThreatVector {
     ToolSideEffects,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvidenceKind {
+    LcMicroSnapshot,
+    SnMicroSnapshot,
+    RulesetDigest,
+    CbvDigest,
+    PevDigest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvidenceRef {
+    pub kind: EvidenceKind,
+    pub digest: [u8; 32],
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ToolKey {
     pub tool_id: String,

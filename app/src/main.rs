@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use dbm_core::{EvidenceKind, EvidenceRef};
 use engine::{RegulationEngine, RegulationSnapshot};
 use hex::encode as hex_encode;
 use profiles::ProfileState;
@@ -38,6 +39,7 @@ fn format_snapshot(snapshot: &RegulationSnapshot) -> String {
         .control_frame_digest
         .map(hex_encode)
         .unwrap_or_else(|| "NONE".to_string());
+    let evidence = format_evidence_refs(&snapshot.evidence_refs);
 
     let lines = [
         format!("profile: {}", format_profile(snapshot.profile)),
@@ -49,6 +51,7 @@ fn format_snapshot(snapshot: &RegulationSnapshot) -> String {
         ),
         format!("deescalation_lock: {}", snapshot.deescalation_lock),
         format!("control_frame_digest: {}", digest),
+        format!("evidence_refs: {}", evidence),
         format!(
             "rsv: integrity={} threat={} policy_pressure={} arousal={} stability={}",
             format_integrity(snapshot.rsv_summary.integrity),
@@ -60,6 +63,33 @@ fn format_snapshot(snapshot: &RegulationSnapshot) -> String {
     ];
 
     lines.join("\n")
+}
+
+fn format_evidence_refs(refs: &[EvidenceRef]) -> String {
+    if refs.is_empty() {
+        return "NONE".to_string();
+    }
+
+    refs.iter()
+        .map(|evidence| {
+            format!(
+                "{}={}",
+                format_evidence_kind(evidence.kind),
+                hex_encode(evidence.digest)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_evidence_kind(kind: EvidenceKind) -> &'static str {
+    match kind {
+        EvidenceKind::LcMicroSnapshot => "mc:lc",
+        EvidenceKind::SnMicroSnapshot => "mc:sn",
+        EvidenceKind::RulesetDigest => "ruleset",
+        EvidenceKind::CbvDigest => "cbv",
+        EvidenceKind::PevDigest => "pev",
+    }
 }
 
 fn format_profile(profile: ProfileState) -> &'static str {
@@ -136,6 +166,7 @@ mod tests {
             },
             deescalation_lock: true,
             control_frame_digest: Some([0xAA; 32]),
+            evidence_refs: Vec::new(),
             rsv_summary: RsvSummary {
                 integrity: IntegrityStateClass::Degraded,
                 threat: LevelClass::Med,
@@ -150,6 +181,7 @@ mod tests {
             + "overlays: simulate_first=true export_lock=false novelty_lock=true\n"
             + "deescalation_lock: true\n"
             + "control_frame_digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+            + "evidence_refs: NONE\n"
             + "rsv: integrity=DEGRADED threat=MED policy_pressure=HIGH arousal=LOW stability=UNKNOWN";
 
         assert_eq!(format_snapshot(&snapshot), expected);

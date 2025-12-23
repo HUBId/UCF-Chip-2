@@ -6,6 +6,8 @@ edition = "2021"
 [features]
 microcircuit-lc = ["dbm_7_lc/microcircuit-lc"]
 microcircuit-lc-spike = ["dbm_7_lc/microcircuit-lc-spike"]
+microcircuit-sn = ["dbm_0_sn/microcircuit-sn"]
+microcircuit-sn-attractor = ["dbm_0_sn/microcircuit-sn-attractor"]
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
@@ -26,3 +28,6 @@ dbm_pprf = { path = "../dbm_pprf" }
 dbm_13_hypothalamus = { path = "../dbm_13_hypothalamus" }
 emotion_field = { path = "../emotion_field" }
 ucf = { package = "ucf-protocol", path = "../../ucf-protocol" }
+
+[dev-dependencies]
+microcircuit_core = { path = "../microcircuit_core" }

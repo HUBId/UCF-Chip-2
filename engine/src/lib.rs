@@ -3,7 +3,7 @@
 use dbm_13_hypothalamus::ControlDecision as HypoDecision;
 use dbm_bus::BrainBus;
 use dbm_core::{
-    DwmMode, IntegrityState, LevelClass as BrainLevel, OverlaySet as BrainOverlay,
+    DwmMode, EvidenceRef, IntegrityState, LevelClass as BrainLevel, OverlaySet as BrainOverlay,
     ProfileState as BrainProfile, ThreatVector,
 };
 use dbm_hpa::{Hpa, HpaOutput};
@@ -83,6 +83,7 @@ pub struct RegulationSnapshot {
     pub overlays: OverlaySet,
     pub deescalation_lock: bool,
     pub control_frame_digest: Option<[u8; 32]>,
+    pub evidence_refs: Vec<EvidenceRef>,
     pub rsv_summary: RsvSummary,
 }
 
@@ -179,6 +180,7 @@ impl RegulationEngine {
             overlays: decision.overlays,
             deescalation_lock: decision.deescalation_lock,
             control_frame_digest: digest,
+            evidence_refs: brain_output.evidence_refs.clone(),
             rsv_summary: self.rsv_summary(),
         }
     }
