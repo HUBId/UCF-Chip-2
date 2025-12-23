@@ -35,6 +35,8 @@ members = [
     "crates/microcircuit_dopamin_attractor",
     "crates/microcircuit_serotonin_stub",
     "crates/microcircuit_serotonin_attractor",
+    "crates/microcircuit_amygdala_stub",
+    "crates/microcircuit_amygdala_pop",
 ]
 resolver = "2"
 

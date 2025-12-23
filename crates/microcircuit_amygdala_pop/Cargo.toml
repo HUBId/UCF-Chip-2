@@ -1,0 +1,12 @@
+[package]
+name = "microcircuit_amygdala_pop"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dbm_core = { path = "../dbm_core" }
+microcircuit_core = { path = "../microcircuit_core" }
+microcircuit_amygdala_stub = { path = "../microcircuit_amygdala_stub" }
