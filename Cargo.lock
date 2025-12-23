@@ -131,6 +131,7 @@ version = "0.1.0"
 dependencies = [
  "dbm_core",
  "microcircuit_core",
+ "microcircuit_lc_spike",
  "microcircuit_lc_stub",
 ]
 
@@ -341,6 +342,15 @@ name = "microcircuit_core"
 version = "0.1.0"
 dependencies = [
  "blake3",
+]
+
+[[package]]
+name = "microcircuit_lc_spike"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_lc_stub",
 ]
 
 [[package]]

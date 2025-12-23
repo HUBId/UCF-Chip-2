@@ -3,6 +3,10 @@ name = "dbm_bus"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+microcircuit-lc = ["dbm_7_lc/microcircuit-lc"]
+microcircuit-lc-spike = ["dbm_7_lc/microcircuit-lc-spike"]
+
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 dbm_hpa = { path = "../dbm_hpa" }
