@@ -2,26 +2,27 @@
 
 use baseline_resolver::{resolve_baseline, BaselineInputs, HbvOffsets};
 use blake3::Hasher;
-use dbm_0_sn::{SnInput, SubstantiaNigra};
-use dbm_12_insula::{Insula, InsulaInput};
-use dbm_13_hypothalamus::{ControlDecision as HypoDecision, Hypothalamus, HypothalamusInput};
-use dbm_18_cerebellum::{CerInput, CerOutput, Cerebellum};
-use dbm_6_dopamin_nacc::{DopaInput, DopaOutput, DopaminNacc};
-use dbm_7_lc::{Lc, LcInput};
-use dbm_8_serotonin::{SerInput, Serotonin};
-use dbm_9_amygdala::{AmyInput, Amygdala};
+use dbm_0_sn::SnInput;
+use dbm_12_insula::InsulaInput;
+use dbm_13_hypothalamus::{ControlDecision as HypoDecision, HypothalamusInput};
+use dbm_18_cerebellum::{CerInput, CerOutput};
+use dbm_6_dopamin_nacc::DopaInput;
+use dbm_7_lc::LcInput;
+use dbm_8_serotonin::SerInput;
+use dbm_9_amygdala::AmyInput;
+use dbm_bus::BrainBus;
 use dbm_core::{
     BaselineVector, CooldownClass as BrainCooldown, DbmModule, DwmMode, IntegrityState,
-    IsvSnapshot, LevelClass as BrainLevel, OrientTarget, OverlaySet as BrainOverlay,
+    IsvSnapshot, LevelClass as BrainLevel, OverlaySet as BrainOverlay,
     ProfileState as BrainProfile,
 };
 use dbm_hpa::{Hpa, HpaInput, HpaOutput};
-use dbm_pag::{DefensePattern, Pag, PagInput};
-use dbm_pmrf::{Pmrf, PmrfInput};
-use dbm_pprf::{Pprf, PprfInput};
-use dbm_sc::{Sc, ScInput};
-use dbm_stn::{Stn, StnInput};
-use emotion_field::{EmotionFieldInput, EmotionFieldModule};
+use dbm_pag::{DefensePattern, PagInput};
+use dbm_pmrf::PmrfInput;
+use dbm_pprf::PprfInput;
+use dbm_sc::ScInput;
+use dbm_stn::StnInput;
+use emotion_field::EmotionFieldInput;
 use profiles::{
     apply_cbv_modifiers, apply_classification, apply_pev_modifiers, classify_signal_frame,
     ControlDecision, FlappingPenaltyMode, OverlaySet, ProfileState, RegulationConfig,
@@ -102,29 +103,8 @@ pub struct RegulationEngine {
     session_id: Option<String>,
     signal_queue: VecDeque<ucf::v1::SignalFrame>,
     anti_flapping_state: AntiFlappingState,
-    lc: Lc,
-    serotonin: Serotonin,
-    amygdala: Amygdala,
-    pag: Pag,
-    stn: Stn,
-    pmrf: Pmrf,
     counters: WindowCounters,
-    sn: SubstantiaNigra,
-    sc: Sc,
-    pprf: Pprf,
-    cerebellum: Cerebellum,
-    last_cerebellum_output: Option<CerOutput>,
-    dopamin: DopaminNacc,
-    last_dopa_output: Option<DopaOutput>,
-    hpa: Hpa,
-    last_hpa_output: HpaOutput,
-    last_baseline_vector: BaselineVector,
-    emotion_field: EmotionFieldModule,
-    last_emotion_field: Option<dbm_core::EmotionField>,
-    current_dwm: DwmMode,
-    current_target: OrientTarget,
-    insula: Insula,
-    hypothalamus: Hypothalamus,
+    brain_bus: BrainBus,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -162,29 +142,8 @@ impl Default for RegulationEngine {
                     session_id: None,
                     signal_queue: VecDeque::new(),
                     anti_flapping_state: AntiFlappingState::default(),
-                    lc: Lc::new(),
-                    serotonin: Serotonin::new(),
-                    amygdala: Amygdala::new(),
-                    pag: Pag::new(),
-                    stn: Stn::new(),
-                    pmrf: Pmrf::new(),
                     counters: WindowCounters::default(),
-                    sn: SubstantiaNigra::new(),
-                    sc: Sc::new(),
-                    pprf: Pprf::new(),
-                    cerebellum: Cerebellum::new(),
-                    last_cerebellum_output: None,
-                    dopamin: DopaminNacc::new(),
-                    last_dopa_output: None,
-                    hpa,
-                    last_hpa_output,
-                    last_baseline_vector: BaselineVector::default(),
-                    emotion_field: EmotionFieldModule::new(),
-                    last_emotion_field: None,
-                    current_dwm: DwmMode::ExecPlan,
-                    current_target: OrientTarget::Approval,
-                    insula: Insula::new(),
-                    hypothalamus: Hypothalamus::new(),
+                    brain_bus: BrainBus::with_hpa(hpa, last_hpa_output),
                 }
             }
             Err(_) => {
@@ -197,29 +156,8 @@ impl Default for RegulationEngine {
                     session_id: None,
                     signal_queue: VecDeque::new(),
                     anti_flapping_state: AntiFlappingState::default(),
-                    lc: Lc::new(),
-                    serotonin: Serotonin::new(),
-                    amygdala: Amygdala::new(),
-                    pag: Pag::new(),
-                    stn: Stn::new(),
-                    pmrf: Pmrf::new(),
                     counters: WindowCounters::default(),
-                    sn: SubstantiaNigra::new(),
-                    sc: Sc::new(),
-                    pprf: Pprf::new(),
-                    cerebellum: Cerebellum::new(),
-                    last_cerebellum_output: None,
-                    dopamin: DopaminNacc::new(),
-                    last_dopa_output: None,
-                    hpa,
-                    last_hpa_output,
-                    last_baseline_vector: BaselineVector::default(),
-                    emotion_field: EmotionFieldModule::new(),
-                    last_emotion_field: None,
-                    current_dwm: DwmMode::ExecPlan,
-                    current_target: OrientTarget::Approval,
-                    insula: Insula::new(),
-                    hypothalamus: Hypothalamus::new(),
+                    brain_bus: BrainBus::with_hpa(hpa, last_hpa_output),
                 }
             }
         }
@@ -238,29 +176,8 @@ impl RegulationEngine {
             session_id: None,
             signal_queue: VecDeque::new(),
             anti_flapping_state: AntiFlappingState::default(),
-            lc: Lc::new(),
-            serotonin: Serotonin::new(),
-            amygdala: Amygdala::new(),
-            pag: Pag::new(),
-            stn: Stn::new(),
-            pmrf: Pmrf::new(),
             counters: WindowCounters::default(),
-            sn: SubstantiaNigra::new(),
-            sc: Sc::new(),
-            pprf: Pprf::new(),
-            cerebellum: Cerebellum::new(),
-            last_cerebellum_output: None,
-            dopamin: DopaminNacc::new(),
-            last_dopa_output: None,
-            hpa,
-            last_hpa_output,
-            last_baseline_vector: BaselineVector::default(),
-            emotion_field: EmotionFieldModule::new(),
-            last_emotion_field: None,
-            current_dwm: DwmMode::ExecPlan,
-            current_target: OrientTarget::Approval,
-            insula: Insula::new(),
-            hypothalamus: Hypothalamus::new(),
+            brain_bus: BrainBus::with_hpa(hpa, last_hpa_output),
         }
     }
 
@@ -297,7 +214,7 @@ impl RegulationEngine {
     }
 
     pub fn emotion_field_snapshot(&self) -> Option<dbm_core::EmotionField> {
-        self.last_emotion_field.clone()
+        self.brain_bus.last_emotion_field()
     }
 
     pub fn enqueue_signal_frame(&mut self, frame: ucf::v1::SignalFrame) -> Result<(), EngineError> {
@@ -359,8 +276,8 @@ impl RegulationEngine {
     }
 
     fn update_emotion_field(&mut self, input: EmotionFieldInput) {
-        let field = self.emotion_field.tick(&input);
-        self.last_emotion_field = Some(field);
+        let field = self.brain_bus.emotion_field_mut().tick(&input);
+        self.brain_bus.set_last_emotion_field(Some(field));
     }
 
     fn update_hpa(
@@ -386,11 +303,11 @@ impl RegulationEngine {
                 stable_medium_window,
             };
 
-            let output = self.hpa.tick(&input);
-            self.last_hpa_output = output.clone();
+            let output = self.brain_bus.hpa_mut().tick(&input);
+            self.brain_bus.set_last_hpa_output(output.clone());
         }
 
-        self.last_hpa_output.clone()
+        self.brain_bus.last_hpa_output()
     }
 
     fn resolve_baseline_vector(
@@ -429,7 +346,7 @@ impl RegulationEngine {
         };
 
         let baseline = resolve_baseline(&inputs);
-        self.last_baseline_vector = baseline.clone();
+        self.brain_bus.set_last_baseline_vector(baseline.clone());
         baseline
     }
 
@@ -448,10 +365,6 @@ impl RegulationEngine {
         self.rsv.update_unlock_state(&frame);
 
         update_window_counters(&mut self.counters, &classified);
-        if classified.window_kind == ucf::v1::WindowKind::Medium {
-            self.pprf.on_medium_window_rollover();
-        }
-
         let hbv_output = self.update_hpa(&classified);
         let baseline_vector = self.resolve_baseline_vector(&classified, &hbv_output);
 
@@ -467,7 +380,11 @@ impl RegulationEngine {
 
         arousal_floor = level_max(arousal_floor, baseline_vector.caution_floor);
 
-        let lc_output = self.lc.tick(&LcInput {
+        if classified.window_kind == ucf::v1::WindowKind::Medium {
+            self.brain_bus.pprf_mut().on_medium_window_rollover();
+        }
+
+        let lc_output = self.brain_bus.lc_mut().tick(&LcInput {
             integrity: to_brain_integrity(classified.integrity_state),
             receipt_invalid_count_short: self.counters.short_receipt_invalid_count,
             receipt_missing_count_short: self.counters.short_receipt_missing_count,
@@ -477,7 +394,7 @@ impl RegulationEngine {
             arousal_floor,
         });
 
-        let ser_output = self.serotonin.tick(&SerInput {
+        let ser_output = self.brain_bus.serotonin_mut().tick(&SerInput {
             integrity: to_brain_integrity(classified.integrity_state),
             replay_mismatch_present: self.counters.medium_replay_mismatch,
             receipt_invalid_count_medium: self.counters.medium_receipt_invalid_count,
@@ -489,12 +406,14 @@ impl RegulationEngine {
 
         let ser_output = apply_baseline_cooldown_bias(ser_output, &baseline_vector);
 
-        let amy_output =
-            self.amygdala
-                .tick(&build_amygdala_input(&frame, &classified, &self.counters));
+        let amy_output = self.brain_bus.amygdala_mut().tick(&build_amygdala_input(
+            &frame,
+            &classified,
+            &self.counters,
+        ));
         self.rsv.threat = translate_level(amy_output.threat);
 
-        let pag_output = self.pag.tick(&PagInput {
+        let pag_output = self.brain_bus.pag_mut().tick(&PagInput {
             integrity: to_brain_integrity(classified.integrity_state),
             threat: amy_output.threat,
             vectors: amy_output.vectors.clone(),
@@ -502,7 +421,7 @@ impl RegulationEngine {
             stability: ser_output.stability,
         });
 
-        let mut dopa_output = self.last_dopa_output.clone().unwrap_or_default();
+        let mut dopa_output = self.brain_bus.last_dopa_output().unwrap_or_default();
         if classified.window_kind == ucf::v1::WindowKind::Medium {
             if let Some(input) = build_dopa_input(
                 &frame,
@@ -511,8 +430,9 @@ impl RegulationEngine {
                 &self.counters,
                 to_brain_level(self.rsv.budget_stress),
             ) {
-                dopa_output = self.dopamin.tick(&input);
-                self.last_dopa_output = Some(dopa_output.clone());
+                dopa_output = self.brain_bus.dopamin_mut().tick(&input);
+                self.brain_bus
+                    .set_last_dopa_output(Some(dopa_output.clone()));
             }
         }
 
@@ -541,7 +461,7 @@ impl RegulationEngine {
             pev_present,
             dopa_output.progress,
         );
-        let mut isv = self.insula.tick(&insula_input);
+        let mut isv = self.brain_bus.insula_mut().tick(&insula_input);
         isv.threat = level_max(isv.threat, amy_output.threat);
         isv.threat_vectors = Some(amy_output.vectors.clone());
         isv.dominant_reason_codes
@@ -554,7 +474,7 @@ impl RegulationEngine {
         isv.dominant_reason_codes
             .extend(dopa_output.reason_codes.codes.clone());
 
-        let stn_output = self.stn.tick(&StnInput {
+        let stn_output = self.brain_bus.stn_mut().tick(&StnInput {
             policy_pressure: isv.policy_pressure,
             arousal: lc_output.arousal,
             threat: amy_output.threat,
@@ -563,7 +483,7 @@ impl RegulationEngine {
             integrity: to_brain_integrity(classified.integrity_state),
         });
 
-        let pmrf_output = self.pmrf.tick(&PmrfInput {
+        let pmrf_output = self.brain_bus.pmrf_mut().tick(&PmrfInput {
             divergence: to_brain_level(self.rsv.divergence),
             policy_pressure: isv.policy_pressure,
             stability: ser_output.stability,
@@ -635,12 +555,12 @@ impl RegulationEngine {
         };
         update_window_counters(&mut self.counters, &classified);
         if classified.window_kind == ucf::v1::WindowKind::Medium {
-            self.pprf.on_medium_window_rollover();
+            self.brain_bus.pprf_mut().on_medium_window_rollover();
         }
 
         let hbv_output = self.update_hpa(&classified);
         let baseline_vector = self.resolve_baseline_vector(&classified, &hbv_output);
-        let cerebellum_output = self.last_cerebellum_output.clone();
+        let cerebellum_output = self.brain_bus.last_cerebellum_output();
         let arousal_floor = if matches!(
             cerebellum_output.as_ref().map(|output| output.divergence),
             Some(BrainLevel::High)
@@ -650,7 +570,7 @@ impl RegulationEngine {
             BrainLevel::Low
         };
 
-        let lc_output = self.lc.tick(&LcInput {
+        let lc_output = self.brain_bus.lc_mut().tick(&LcInput {
             integrity: to_brain_integrity(classified.integrity_state),
             receipt_invalid_count_short: self.counters.short_receipt_invalid_count,
             receipt_missing_count_short: self.counters.short_receipt_missing_count,
@@ -660,7 +580,7 @@ impl RegulationEngine {
             arousal_floor: level_max(arousal_floor, baseline_vector.caution_floor),
         });
 
-        let ser_output = self.serotonin.tick(&SerInput {
+        let ser_output = self.brain_bus.serotonin_mut().tick(&SerInput {
             integrity: to_brain_integrity(classified.integrity_state),
             replay_mismatch_present: self.counters.medium_replay_mismatch,
             receipt_invalid_count_medium: self.counters.medium_receipt_invalid_count,
@@ -672,12 +592,14 @@ impl RegulationEngine {
 
         let ser_output = apply_baseline_cooldown_bias(ser_output, &baseline_vector);
 
-        let amy_output =
-            self.amygdala
-                .tick(&build_amygdala_input(&frame, &classified, &self.counters));
+        let amy_output = self.brain_bus.amygdala_mut().tick(&build_amygdala_input(
+            &frame,
+            &classified,
+            &self.counters,
+        ));
         self.rsv.threat = translate_level(amy_output.threat);
 
-        let pag_output = self.pag.tick(&PagInput {
+        let pag_output = self.brain_bus.pag_mut().tick(&PagInput {
             integrity: to_brain_integrity(classified.integrity_state),
             threat: amy_output.threat,
             vectors: amy_output.vectors.clone(),
@@ -685,7 +607,7 @@ impl RegulationEngine {
             stability: ser_output.stability,
         });
 
-        let mut dopa_output = self.last_dopa_output.clone().unwrap_or_default();
+        let mut dopa_output = self.brain_bus.last_dopa_output().unwrap_or_default();
         if classified.window_kind == ucf::v1::WindowKind::Medium {
             if let Some(input) = build_dopa_input(
                 &frame,
@@ -694,8 +616,9 @@ impl RegulationEngine {
                 &self.counters,
                 to_brain_level(self.rsv.budget_stress),
             ) {
-                dopa_output = self.dopamin.tick(&input);
-                self.last_dopa_output = Some(dopa_output.clone());
+                dopa_output = self.brain_bus.dopamin_mut().tick(&input);
+                self.brain_bus
+                    .set_last_dopa_output(Some(dopa_output.clone()));
             }
         }
 
@@ -708,7 +631,7 @@ impl RegulationEngine {
 
         let insula_input =
             build_insula_input(&frame, &classified, false, false, dopa_output.progress);
-        let mut isv = self.insula.tick(&insula_input);
+        let mut isv = self.brain_bus.insula_mut().tick(&insula_input);
         isv.threat = level_max(isv.threat, amy_output.threat);
         isv.threat_vectors = Some(amy_output.vectors.clone());
         isv.dominant_reason_codes
@@ -723,7 +646,7 @@ impl RegulationEngine {
 
         let emotion_isv = isv.clone();
 
-        let stn_output = self.stn.tick(&StnInput {
+        let stn_output = self.brain_bus.stn_mut().tick(&StnInput {
             policy_pressure: isv.policy_pressure,
             arousal: lc_output.arousal,
             threat: amy_output.threat,
@@ -732,7 +655,7 @@ impl RegulationEngine {
             integrity: to_brain_integrity(classified.integrity_state),
         });
 
-        let pmrf_output = self.pmrf.tick(&PmrfInput {
+        let pmrf_output = self.brain_bus.pmrf_mut().tick(&PmrfInput {
             divergence: to_brain_level(self.rsv.divergence),
             policy_pressure: isv.policy_pressure,
             stability: ser_output.stability,
@@ -826,9 +749,10 @@ impl RegulationEngine {
             dlp_block_count_medium: exec_stats.map(|stats| stats.dlp_block_count).unwrap_or(0),
         };
 
-        let output = self.cerebellum.tick(&cer_input);
+        let output = self.brain_bus.cerebellum_mut().tick(&cer_input);
         self.rsv.divergence = translate_level(output.divergence);
-        self.last_cerebellum_output = Some(output.clone());
+        self.brain_bus
+            .set_last_cerebellum_output(Some(output.clone()));
         Some(output)
     }
 
@@ -841,6 +765,7 @@ impl RegulationEngine {
         HypoDecision,
         DwmMode,
     ) {
+        let bus = &mut self.brain_bus;
         let RunSnContext {
             isv,
             cooldown,
@@ -853,8 +778,8 @@ impl RegulationEngine {
             replay_hint,
             reward_block,
         } = ctx;
-        let previous_dwm = self.current_dwm;
-        let sn_output = self.sn.tick(&SnInput {
+        let previous_dwm = bus.current_dwm();
+        let sn_output = bus.sn_mut().tick(&SnInput {
             isv: isv.clone(),
             cooldown_class: cooldown,
             current_dwm: Some(previous_dwm),
@@ -862,7 +787,7 @@ impl RegulationEngine {
             reward_block,
         });
 
-        let sc_output = self.sc.tick(&ScInput {
+        let sc_output = bus.sc_mut().tick(&ScInput {
             isv: isv.clone(),
             salience_items: sn_output.salience_items.clone(),
             unlock_present: self.rsv.unlock_ready,
@@ -870,9 +795,10 @@ impl RegulationEngine {
             integrity,
         });
 
-        let pprf_output = self.pprf.tick(&PprfInput {
+        let current_target = bus.current_target();
+        let pprf_output = bus.pprf_mut().tick(&PprfInput {
             orient: sc_output,
-            current_target: self.current_target,
+            current_target,
             current_dwm: sn_output.dwm,
             cooldown_class,
             stability,
@@ -888,9 +814,9 @@ impl RegulationEngine {
             novelty_lock_bias: level_at_least(baseline.novelty_dampening, BrainLevel::Med),
         };
 
-        let hypo_decision = self.hypothalamus.tick(&hypo_input);
-        self.current_dwm = pprf_output.active_dwm;
-        self.current_target = pprf_output.active_target;
+        let hypo_decision = bus.hypothalamus_mut().tick(&hypo_input);
+        bus.set_current_dwm(pprf_output.active_dwm);
+        bus.set_current_target(pprf_output.active_target);
 
         (sn_output, pprf_output, hypo_decision, previous_dwm)
     }
@@ -1240,25 +1166,21 @@ impl RegulationEngine {
             .as_ref()
             .and_then(|reader| reader.get_latest_pev());
 
-        if level_at_least(self.last_baseline_vector.export_strictness, BrainLevel::Med) {
+        let last_baseline_vector = self.brain_bus.last_baseline_vector();
+
+        if level_at_least(last_baseline_vector.export_strictness, BrainLevel::Med) {
             decision.overlays.export_lock = true;
         }
 
-        if level_at_least(
-            self.last_baseline_vector.chain_conservatism,
-            BrainLevel::High,
-        ) {
+        if level_at_least(last_baseline_vector.chain_conservatism, BrainLevel::High) {
             decision.overlays.simulate_first = true;
         }
 
-        if level_at_least(
-            self.last_baseline_vector.approval_strictness,
-            BrainLevel::Med,
-        ) {
+        if level_at_least(last_baseline_vector.approval_strictness, BrainLevel::Med) {
             decision.approval_mode = self.config.character_baselines.strict_approval_mode.clone();
         }
 
-        if level_at_least(self.last_baseline_vector.novelty_dampening, BrainLevel::Med) {
+        if level_at_least(last_baseline_vector.novelty_dampening, BrainLevel::Med) {
             decision.overlays.novelty_lock = true;
         }
 
@@ -1817,6 +1739,7 @@ fn translate_reason_set(reason_set: &dbm_core::ReasonSet) -> Vec<ucf::v1::Reason
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dbm_core::OrientTarget;
     use profiles::{OverlayEnableRule, OverlaySet, ProfileState, RegulationConfig, RuleCondition};
     use pvgs_client::{MockPvgsReader, PvgsError};
     use std::sync::{Arc, Mutex};
@@ -1932,14 +1855,16 @@ mod tests {
 
     fn reset_hpa(engine: &mut RegulationEngine) {
         let (hpa, last_hpa_output) = init_hpa();
-        engine.hpa = hpa;
-        engine.last_hpa_output = last_hpa_output;
+        *engine.brain_bus.hpa_mut() = hpa;
+        engine.brain_bus.set_last_hpa_output(last_hpa_output);
     }
 
     #[test]
     fn hbv_arousal_floor_enables_overlays() {
         let mut engine = RegulationEngine::default();
-        engine.last_hpa_output.baseline_caution_offset = 4;
+        let mut last_hpa_output = engine.brain_bus.last_hpa_output();
+        last_hpa_output.baseline_caution_offset = 4;
+        engine.brain_bus.set_last_hpa_output(last_hpa_output);
 
         let control = engine.on_signal_frame(base_frame(), 1);
 
@@ -1951,7 +1876,9 @@ mod tests {
     #[test]
     fn hbv_cooldown_bias_applies() {
         let mut engine = RegulationEngine::default();
-        engine.last_hpa_output.baseline_cooldown_multiplier_class = 3;
+        let mut last_hpa_output = engine.brain_bus.last_hpa_output();
+        last_hpa_output.baseline_cooldown_multiplier_class = 3;
+        engine.brain_bus.set_last_hpa_output(last_hpa_output);
 
         let control = engine.on_signal_frame(base_frame(), 1);
         assert_eq!(
@@ -1963,9 +1890,11 @@ mod tests {
     #[test]
     fn hbv_biases_hypothalamus_defaults() {
         let mut engine = RegulationEngine::default();
-        engine.last_hpa_output.baseline_chain_conservatism_offset = 2;
-        engine.last_hpa_output.baseline_export_strictness_offset = 1;
-        engine.last_hpa_output.baseline_approval_strictness_offset = 1;
+        let mut last_hpa_output = engine.brain_bus.last_hpa_output();
+        last_hpa_output.baseline_chain_conservatism_offset = 2;
+        last_hpa_output.baseline_export_strictness_offset = 1;
+        last_hpa_output.baseline_approval_strictness_offset = 1;
+        engine.brain_bus.set_last_hpa_output(last_hpa_output);
 
         let control = engine.on_signal_frame(base_frame(), 1);
         let overlays = control.overlays.expect("overlays present");
@@ -2006,9 +1935,9 @@ mod tests {
 
         let control_integrity = engine.on_signal_frame(integrity_frame, 1);
 
-        assert_eq!(engine.current_target, OrientTarget::Integrity);
-        assert_eq!(engine.current_dwm, DwmMode::Report);
-        assert!(engine.pprf.lock_until_ms > 1);
+        assert_eq!(engine.brain_bus.current_target(), OrientTarget::Integrity);
+        assert_eq!(engine.brain_bus.current_dwm(), DwmMode::Report);
+        assert!(engine.brain_bus.pprf().lock_until_ms > 1);
         assert!(control_integrity
             .profile_reason_codes
             .contains(&(ucf::v1::ReasonCode::RcGvOrientTargetIntegrity as i32)));
@@ -2017,7 +1946,7 @@ mod tests {
         calm_frame.timestamp_ms = Some(2);
         let control_blocked = engine.on_signal_frame(calm_frame, 2);
 
-        assert_eq!(engine.current_target, OrientTarget::Integrity);
+        assert_eq!(engine.brain_bus.current_target(), OrientTarget::Integrity);
         assert!(control_blocked
             .profile_reason_codes
             .contains(&(ucf::v1::ReasonCode::RcGvFocusShiftBlockedByLock as i32)));
@@ -2031,18 +1960,18 @@ mod tests {
         initial_frame.timestamp_ms = Some(10);
         let _ = engine.on_signal_frame(initial_frame, 10);
 
-        let initial_lock = engine.pprf.lock_until_ms;
+        let initial_lock = engine.brain_bus.pprf().lock_until_ms;
         assert!(initial_lock > 10);
-        assert_eq!(engine.current_target, OrientTarget::Approval);
+        assert_eq!(engine.brain_bus.current_target(), OrientTarget::Approval);
 
         let mut integrity_frame = base_frame();
         integrity_frame.integrity_state = IntegrityStateClass::Fail as i32;
         integrity_frame.timestamp_ms = Some(11);
         let control = engine.on_signal_frame(integrity_frame, 11);
 
-        assert_eq!(engine.current_target, OrientTarget::Integrity);
-        assert_eq!(engine.current_dwm, DwmMode::Report);
-        assert!(engine.pprf.lock_until_ms > initial_lock);
+        assert_eq!(engine.brain_bus.current_target(), OrientTarget::Integrity);
+        assert_eq!(engine.brain_bus.current_dwm(), DwmMode::Report);
+        assert!(engine.brain_bus.pprf().lock_until_ms > initial_lock);
         assert!(control
             .profile_reason_codes
             .contains(&(ucf::v1::ReasonCode::RcGvFocusShiftExecuted as i32)));
@@ -2117,7 +2046,7 @@ mod tests {
         frame.integrity_state = IntegrityStateClass::Fail as i32;
         let control = engine.on_signal_frame(frame, 1);
 
-        let dopa = engine.last_dopa_output.as_ref().unwrap();
+        let dopa = engine.brain_bus.last_dopa_output().unwrap();
         assert_eq!(dopa.progress, BrainLevel::Med);
         assert!(control
             .profile_reason_codes
@@ -2133,7 +2062,7 @@ mod tests {
             let _ = engine.on_signal_frame(frame, ts);
         }
 
-        let dopa = engine.last_dopa_output.as_ref().unwrap();
+        let dopa = engine.brain_bus.last_dopa_output().unwrap();
         assert_eq!(dopa.progress, BrainLevel::High);
         assert!(!dopa.replay_hint);
     }
@@ -2148,8 +2077,8 @@ mod tests {
             let control = engine.on_signal_frame(frame, ts);
             if ts == 3 {
                 assert!(engine
-                    .last_dopa_output
-                    .as_ref()
+                    .brain_bus
+                    .last_dopa_output()
                     .map(|out| out.replay_hint)
                     .unwrap_or(false));
                 assert!(control

@@ -5,7 +5,7 @@ use dbm_0_sn::{SnInput, SubstantiaNigra};
 use dbm_12_insula::{Insula, InsulaInput};
 use dbm_13_hypothalamus::{ControlDecision, Hypothalamus, HypothalamusInput};
 use dbm_18_cerebellum::{CerInput, Cerebellum};
-use dbm_6_dopamin_nacc::{DopaInput, DopaminNacc};
+use dbm_6_dopamin_nacc::{DopaInput, DopaOutput, DopaminNacc};
 use dbm_7_lc::{Lc, LcInput};
 use dbm_8_serotonin::{SerInput, Serotonin};
 use dbm_9_amygdala::{AmyInput, Amygdala};
@@ -70,6 +70,11 @@ pub struct BrainBus {
     emotion_field: EmotionFieldModule,
     current_dwm: DwmMode,
     current_target: OrientTarget,
+    last_cerebellum_output: Option<dbm_18_cerebellum::CerOutput>,
+    last_dopa_output: Option<DopaOutput>,
+    last_hpa_output: HpaOutput,
+    last_baseline_vector: BaselineVector,
+    last_emotion_field: Option<EmotionField>,
 }
 
 impl BrainBus {
@@ -79,6 +84,134 @@ impl BrainBus {
             current_target: OrientTarget::Approval,
             ..Self::default()
         }
+    }
+
+    pub fn with_hpa(hpa: Hpa, last_hpa_output: HpaOutput) -> Self {
+        Self {
+            hpa,
+            last_hpa_output,
+            ..Self::new()
+        }
+    }
+
+    pub fn lc_mut(&mut self) -> &mut Lc {
+        &mut self.lc
+    }
+
+    pub fn serotonin_mut(&mut self) -> &mut Serotonin {
+        &mut self.serotonin
+    }
+
+    pub fn amygdala_mut(&mut self) -> &mut Amygdala {
+        &mut self.amygdala
+    }
+
+    pub fn pag_mut(&mut self) -> &mut Pag {
+        &mut self.pag
+    }
+
+    pub fn stn_mut(&mut self) -> &mut Stn {
+        &mut self.stn
+    }
+
+    pub fn pmrf_mut(&mut self) -> &mut Pmrf {
+        &mut self.pmrf
+    }
+
+    pub fn sn_mut(&mut self) -> &mut SubstantiaNigra {
+        &mut self.sn
+    }
+
+    pub fn sc_mut(&mut self) -> &mut Sc {
+        &mut self.sc
+    }
+
+    pub fn pprf(&self) -> &Pprf {
+        &self.pprf
+    }
+
+    pub fn pprf_mut(&mut self) -> &mut Pprf {
+        &mut self.pprf
+    }
+
+    pub fn cerebellum_mut(&mut self) -> &mut Cerebellum {
+        &mut self.cerebellum
+    }
+
+    pub fn dopamin_mut(&mut self) -> &mut DopaminNacc {
+        &mut self.dopamin
+    }
+
+    pub fn hpa_mut(&mut self) -> &mut Hpa {
+        &mut self.hpa
+    }
+
+    pub fn insula_mut(&mut self) -> &mut Insula {
+        &mut self.insula
+    }
+
+    pub fn hypothalamus_mut(&mut self) -> &mut Hypothalamus {
+        &mut self.hypothalamus
+    }
+
+    pub fn emotion_field_mut(&mut self) -> &mut EmotionFieldModule {
+        &mut self.emotion_field
+    }
+
+    pub fn current_dwm(&self) -> DwmMode {
+        self.current_dwm
+    }
+
+    pub fn set_current_dwm(&mut self, dwm: DwmMode) {
+        self.current_dwm = dwm;
+    }
+
+    pub fn current_target(&self) -> OrientTarget {
+        self.current_target
+    }
+
+    pub fn set_current_target(&mut self, target: OrientTarget) {
+        self.current_target = target;
+    }
+
+    pub fn last_cerebellum_output(&self) -> Option<dbm_18_cerebellum::CerOutput> {
+        self.last_cerebellum_output.clone()
+    }
+
+    pub fn set_last_cerebellum_output(&mut self, output: Option<dbm_18_cerebellum::CerOutput>) {
+        self.last_cerebellum_output = output;
+    }
+
+    pub fn last_dopa_output(&self) -> Option<DopaOutput> {
+        self.last_dopa_output.clone()
+    }
+
+    pub fn set_last_dopa_output(&mut self, output: Option<DopaOutput>) {
+        self.last_dopa_output = output;
+    }
+
+    pub fn last_hpa_output(&self) -> HpaOutput {
+        self.last_hpa_output.clone()
+    }
+
+    pub fn set_last_hpa_output(&mut self, output: HpaOutput) {
+        self.last_hpa_output = output;
+    }
+
+    pub fn last_baseline_vector(&self) -> BaselineVector {
+        self.last_baseline_vector.clone()
+    }
+
+    pub fn set_last_baseline_vector(&mut self, vector: BaselineVector) {
+        self.last_baseline_vector = vector;
+    }
+
+    pub fn last_emotion_field(&self) -> Option<EmotionField> {
+        self.last_emotion_field.clone()
+    }
+
+    pub fn set_last_emotion_field(&mut self, field: Option<EmotionField>) {
+        self.last_emotion_field = field;
     }
 
     pub fn tick(&mut self, input: BrainInput) -> BrainOutput {

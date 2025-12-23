@@ -28,6 +28,7 @@ dbm_18_cerebellum = { path = "../crates/dbm_18_cerebellum" }
 emotion_field = { path = "../crates/emotion_field" }
 dbm_hpa = { path = "../crates/dbm_hpa" }
 baseline_resolver = { path = "../crates/baseline_resolver" }
+dbm_bus = { path = "../crates/dbm_bus" }
 
 [dev-dependencies]
 pvgs_client = { path = "../pvgs_client", features = ["local-pvgs"] }

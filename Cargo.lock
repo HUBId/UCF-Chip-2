@@ -246,6 +246,7 @@ dependencies = [
  "dbm_7_lc",
  "dbm_8_serotonin",
  "dbm_9_amygdala",
+ "dbm_bus",
  "dbm_core",
  "dbm_hpa",
  "dbm_pag",
