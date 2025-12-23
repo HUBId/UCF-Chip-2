@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet};
+use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet, SuspendRecommendation, ToolKey};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default)]
@@ -12,6 +12,7 @@ pub struct CerInput {
     pub integrity: IntegrityState,
     pub tool_id: Option<String>,
     pub dlp_block_count_medium: u32,
+    pub tool_failures: Vec<(ToolKey, ToolFailureCounts)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +20,8 @@ pub struct CerOutput {
     pub divergence: LevelClass,
     pub side_effect_suspected: bool,
     pub suspend_recommended: bool,
+    pub tool_anomalies: Vec<(ToolKey, LevelClass)>,
+    pub suspend_recommendations: Vec<SuspendRecommendation>,
     pub reason_codes: ReasonSet,
 }
 
@@ -28,6 +31,8 @@ impl Default for CerOutput {
             divergence: LevelClass::Low,
             side_effect_suspected: false,
             suspend_recommended: false,
+            tool_anomalies: Vec::new(),
+            suspend_recommendations: Vec::new(),
             reason_codes: ReasonSet::default(),
         }
     }
@@ -36,12 +41,33 @@ impl Default for CerOutput {
 #[derive(Debug, Default)]
 pub struct Cerebellum {
     divergence: LevelClass,
-    anomaly_counter_global: u32,
-    anomaly_counter_per_tool: HashMap<String, u32>,
-    cooldown_windows: u32,
+    anomaly_counter_per_tool: HashMap<ToolKey, u32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ToolFailureCounts {
+    pub timeouts: u32,
+    pub partial_failures: u32,
+    pub unavailable: u32,
+}
+
+impl ToolFailureCounts {
+    #[allow(dead_code)]
+    fn from_medium_window(timeouts: u32, partial_failures: u32, unavailable: u32) -> Self {
+        Self {
+            timeouts,
+            partial_failures,
+            unavailable,
+        }
+    }
 }
 
 impl Cerebellum {
+    const MAX_TOOL_FAILURES: usize = 16;
+    const MAX_TOOL_COUNTERS: usize = 32;
+    const MAX_TOOL_ANOMALIES: usize = 16;
+    const MAX_SUSPEND_RECOMMENDATIONS: usize = 8;
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -70,22 +96,103 @@ impl Cerebellum {
         }
     }
 
-    fn update_tool_counter(&mut self, tool_id: &str) -> u32 {
-        if self.anomaly_counter_per_tool.contains_key(tool_id) {
-            if let Some(entry) = self.anomaly_counter_per_tool.get_mut(tool_id) {
+    fn determine_tool_anomaly(counts: &ToolFailureCounts) -> LevelClass {
+        if counts.unavailable >= 1 || counts.partial_failures >= 3 || counts.timeouts >= 5 {
+            LevelClass::High
+        } else if counts.partial_failures >= 1 || counts.timeouts >= 2 {
+            LevelClass::Med
+        } else {
+            LevelClass::Low
+        }
+    }
+
+    fn update_tool_counter(&mut self, tool: &ToolKey, anomaly: LevelClass, stable_window: bool) {
+        if !self.anomaly_counter_per_tool.contains_key(tool)
+            && self.anomaly_counter_per_tool.len() >= Self::MAX_TOOL_COUNTERS
+        {
+            if let Some(evict) = self.anomaly_counter_per_tool.keys().max().cloned() {
+                self.anomaly_counter_per_tool.remove(&evict);
+            }
+        }
+
+        let entry = self
+            .anomaly_counter_per_tool
+            .entry(tool.clone())
+            .or_insert(0);
+
+        match anomaly {
+            LevelClass::High => {
+                *entry = entry.saturating_add(2);
+            }
+            LevelClass::Med => {
                 *entry = entry.saturating_add(1);
-                return *entry;
+            }
+            LevelClass::Low => {
+                if stable_window {
+                    *entry = entry.saturating_sub(1);
+                }
+            }
+        }
+    }
+
+    fn prepare_failures(
+        tool_failures: &[(ToolKey, ToolFailureCounts)],
+    ) -> Vec<(ToolKey, ToolFailureCounts)> {
+        let mut failures: Vec<(ToolKey, ToolFailureCounts)> = tool_failures
+            .iter()
+            .map(|(key, counts)| (key.clone().normalized(), counts.clone()))
+            .collect();
+        failures.sort_by(|a, b| a.0.cmp(&b.0));
+        failures.truncate(Self::MAX_TOOL_FAILURES);
+        failures
+    }
+
+    fn build_recommendations(
+        counters: &HashMap<ToolKey, u32>,
+        anomalies: &[(ToolKey, LevelClass)],
+    ) -> Vec<SuspendRecommendation> {
+        let mut recommendations = Vec::new();
+
+        for (tool, _) in anomalies.iter() {
+            if let Some(count) = counters.get(tool) {
+                let severity = if *count >= 6 {
+                    LevelClass::High
+                } else if *count >= 3 {
+                    LevelClass::Med
+                } else {
+                    continue;
+                };
+
+                let mut reason_codes = ReasonSet::default();
+                reason_codes.insert("RC.GV.TOOL.SUSPEND_RECOMMENDED");
+
+                recommendations.push(SuspendRecommendation {
+                    tool: tool.clone(),
+                    severity,
+                    reason_codes,
+                });
             }
         }
 
-        if self.anomaly_counter_per_tool.len() >= 32 {
-            if let Some(max_key) = self.anomaly_counter_per_tool.keys().max().cloned() {
-                self.anomaly_counter_per_tool.remove(&max_key);
+        recommendations.sort_by(|a, b| {
+            let sev_ord = level_severity(b.severity).cmp(&level_severity(a.severity));
+            if sev_ord == std::cmp::Ordering::Equal {
+                a.tool.cmp(&b.tool)
+            } else {
+                sev_ord
             }
-        }
+        });
+        recommendations.truncate(Self::MAX_SUSPEND_RECOMMENDATIONS);
 
-        self.anomaly_counter_per_tool.insert(tool_id.to_string(), 1);
-        1
+        recommendations
+    }
+}
+
+fn level_severity(level: LevelClass) -> u8 {
+    match level {
+        LevelClass::Low => 0,
+        LevelClass::Med => 1,
+        LevelClass::High => 2,
     }
 }
 
@@ -109,29 +216,62 @@ impl DbmModule for Cerebellum {
             };
 
         if divergence == LevelClass::High {
-            self.cooldown_windows = self.cooldown_windows.saturating_add(1);
-            self.anomaly_counter_global = self.anomaly_counter_global.saturating_add(1);
             output.reason_codes.insert("RC.GV.DIVERGENCE.HIGH");
-        } else {
-            self.cooldown_windows = 0;
         }
 
-        let mut per_tool_count = 0;
-        if let Some(tool_id) = &input.tool_id {
-            if divergence == LevelClass::High {
-                per_tool_count = self.update_tool_counter(tool_id);
+        let stable_window = Self::stable_window(input);
+        let mut anomalies: Vec<(ToolKey, LevelClass)> = Vec::new();
+
+        for (tool, counts) in Self::prepare_failures(&input.tool_failures) {
+            let anomaly = Self::determine_tool_anomaly(&counts);
+            self.update_tool_counter(&tool, anomaly, stable_window);
+            if anomaly != LevelClass::Low {
+                anomalies.push((tool, anomaly));
             }
         }
 
-        output.side_effect_suspected = divergence == LevelClass::High
-            && (input.tool_unavailable_count_medium > 0 || input.partial_failure_count_medium > 0);
+        anomalies.sort_by(|a, b| {
+            let sev_ord = level_severity(b.1).cmp(&level_severity(a.1));
+            if sev_ord == std::cmp::Ordering::Equal {
+                a.0.cmp(&b.0)
+            } else {
+                sev_ord
+            }
+        });
+        anomalies.truncate(Self::MAX_TOOL_ANOMALIES);
 
-        output.suspend_recommended =
-            divergence == LevelClass::High && (self.cooldown_windows >= 2 || per_tool_count >= 3);
+        let mut recommendations =
+            Self::build_recommendations(&self.anomaly_counter_per_tool, &anomalies);
 
+        // enrich recommendation reasons based on current anomalies
+        for recommendation in &mut recommendations {
+            if let Some((_, counts)) = input
+                .tool_failures
+                .iter()
+                .find(|(tool, _)| tool == &recommendation.tool)
+            {
+                if counts.timeouts > 0 {
+                    recommendation.reason_codes.insert("RC.GE.EXEC.TIMEOUT");
+                }
+                if counts.partial_failures > 0 {
+                    recommendation
+                        .reason_codes
+                        .insert("RC.GE.EXEC.PARTIAL_FAILURE");
+                }
+            }
+        }
+
+        output.tool_anomalies = anomalies;
+        output.suspend_recommendations = recommendations;
+        output.suspend_recommended = !output.suspend_recommendations.is_empty();
         if output.suspend_recommended {
             output.reason_codes.insert("RC.GV.TOOL.SUSPEND_RECOMMENDED");
         }
+
+        output.side_effect_suspected = output
+            .tool_anomalies
+            .iter()
+            .any(|(_, level)| level == &LevelClass::High);
 
         self.divergence = divergence;
         output.divergence = divergence;
@@ -149,6 +289,21 @@ mod tests {
             integrity: IntegrityState::Ok,
             ..Default::default()
         }
+    }
+
+    fn tool_failure(
+        tool: &str,
+        timeouts: u32,
+        partial_failures: u32,
+    ) -> (ToolKey, ToolFailureCounts) {
+        (
+            ToolKey::new(tool.to_string(), "act".to_string()),
+            ToolFailureCounts {
+                timeouts,
+                partial_failures,
+                unavailable: 0,
+            },
+        )
     }
 
     #[test]
@@ -186,38 +341,63 @@ mod tests {
     }
 
     #[test]
-    fn repeated_high_recommends_suspend() {
+    fn per_tool_counter_recommends_suspend() {
         let mut cerebellum = Cerebellum::new();
-        let input = CerInput {
-            timeout_count_medium: 10,
-            ..base_input()
-        };
+        let mut input = base_input();
+        input.tool_failures = vec![tool_failure("tool-a", 5, 0)];
 
         let _ = cerebellum.tick(&input);
         let output = cerebellum.tick(&input);
 
         assert!(output.suspend_recommended);
-        assert!(output
+        assert_eq!(output.suspend_recommendations[0].severity, LevelClass::Med);
+        assert!(output.suspend_recommendations.iter().any(|rec| rec
             .reason_codes
             .codes
-            .iter()
-            .any(|code| code == "RC.GV.TOOL.SUSPEND_RECOMMENDED"));
+            .contains(&"RC.GE.EXEC.TIMEOUT".to_string())));
     }
 
     #[test]
-    fn deterministic_tool_eviction() {
+    fn deterministic_tool_anomaly_ordering() {
         let mut cerebellum = Cerebellum::new();
+        let mut input = base_input();
+        input.tool_failures = vec![tool_failure("tool-b", 2, 0), tool_failure("tool-a", 2, 0)];
 
-        for idx in 0..33 {
-            let tool = format!("tool-{idx:02}");
-            let _ = cerebellum.tick(&CerInput {
-                timeout_count_medium: 10,
-                tool_id: Some(tool.clone()),
-                ..base_input()
-            });
+        let output = cerebellum.tick(&input);
+
+        let ordered: Vec<String> = output
+            .tool_anomalies
+            .iter()
+            .map(|(tool, _)| tool.tool_id.clone())
+            .collect();
+        assert_eq!(ordered, vec!["tool-a".to_string(), "tool-b".to_string()]);
+    }
+
+    #[test]
+    fn bounded_tool_processing_and_recommendations() {
+        let mut cerebellum = Cerebellum::new();
+        let mut input = base_input();
+        input.tool_failures = (0..50)
+            .map(|idx| tool_failure(&format!("tool-{idx:02}"), 5, 0))
+            .collect();
+
+        for _ in 0..3 {
+            let _ = cerebellum.tick(&input);
         }
 
-        assert_eq!(cerebellum.anomaly_counter_per_tool.len(), 32);
-        assert!(!cerebellum.anomaly_counter_per_tool.contains_key("tool-31"));
+        let output = cerebellum.tick(&input);
+
+        assert!(output.tool_anomalies.len() <= Cerebellum::MAX_TOOL_ANOMALIES);
+        assert_eq!(
+            output.suspend_recommendations.len(),
+            Cerebellum::MAX_SUSPEND_RECOMMENDATIONS
+        );
+
+        let tools: Vec<String> = output
+            .suspend_recommendations
+            .iter()
+            .map(|rec| rec.tool.tool_id.clone())
+            .collect();
+        assert_eq!(tools[0], "tool-00".to_string());
     }
 }

@@ -2,6 +2,7 @@
 
 use dbm_core::{
     DbmModule, IntegrityState, IsvSnapshot, LevelClass, OverlaySet, ProfileState, ReasonSet,
+    ThreatVector,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -11,6 +12,7 @@ pub struct HypothalamusInput {
     pub simulate_first_bias: bool,
     pub approval_strict: bool,
     pub novelty_lock_bias: bool,
+    pub cerebellum_divergence: LevelClass,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +111,21 @@ impl DbmModule for Hypothalamus {
             return decision;
         }
 
+        let tool_side_effects = input.isv.threat_vectors.as_ref().map_or(false, |vectors| {
+            vectors.contains(&ThreatVector::ToolSideEffects)
+        });
+
+        if tool_side_effects || input.cerebellum_divergence == LevelClass::High {
+            if !matches!(decision.profile_state, ProfileState::M2 | ProfileState::M3) {
+                decision.profile_state = ProfileState::M1;
+            }
+            decision.overlays.simulate_first = true;
+            decision
+                .reason_codes
+                .insert("RC.TH.TOOL_SIDE_EFFECTS".to_string());
+            return decision;
+        }
+
         decision.reason_codes.insert("baseline".to_string());
         decision
     }
@@ -182,5 +199,20 @@ mod tests {
 
         assert_eq!(decision.profile_state, ProfileState::M0);
         assert!(!decision.overlays.export_lock);
+    }
+
+    #[test]
+    fn tool_side_effects_enforce_simulate_first() {
+        let mut module = Hypothalamus::new();
+        let mut isv = base_isv();
+        isv.threat_vectors = Some(vec![ThreatVector::ToolSideEffects]);
+
+        let decision = module.tick(&HypothalamusInput {
+            isv,
+            ..Default::default()
+        });
+
+        assert!(decision.overlays.simulate_first);
+        assert!(decision.profile_state == ProfileState::M1);
     }
 }

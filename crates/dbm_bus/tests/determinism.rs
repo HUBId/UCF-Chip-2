@@ -71,6 +71,7 @@ fn canonical_brain_input() -> BrainInput {
             integrity: IntegrityState::Fail,
             tool_id: Some("tool-a".to_string()),
             dlp_block_count_medium: 1,
+            tool_failures: Vec::new(),
         }),
         stn: StnInput {
             integrity: IntegrityState::Fail,

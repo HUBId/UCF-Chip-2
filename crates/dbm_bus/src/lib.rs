@@ -11,7 +11,7 @@ use dbm_8_serotonin::{SerInput, Serotonin};
 use dbm_9_amygdala::{AmyInput, Amygdala};
 use dbm_core::{
     BaselineVector, CooldownClass, DbmModule, DwmMode, EmotionField, IsvSnapshot, LevelClass,
-    OrientTarget, ProfileState, ReasonSet,
+    OrientTarget, ProfileState, ReasonSet, SuspendRecommendation, ThreatVector,
 };
 use dbm_hpa::{Hpa, HpaInput, HpaOutput};
 use dbm_pag::{DefensePattern, Pag, PagInput};
@@ -55,6 +55,7 @@ pub struct BrainOutput {
     pub dopamin: dbm_6_dopamin_nacc::DopaOutput,
     pub isv: IsvSnapshot,
     pub reason_codes: Vec<String>,
+    pub suspend_recommendations: Vec<SuspendRecommendation>,
 }
 
 #[derive(Debug, Default)]
@@ -266,7 +267,17 @@ impl BrainBus {
         let mut ser_output = self.serotonin.tick(&ser_input);
         ser_output = apply_baseline_cooldown_bias(ser_output, &baseline);
 
-        let amy_output = self.amygdala.tick(&input.amygdala);
+        let amy_input = AmyInput {
+            tool_anomaly_present: cerebellum_output
+                .as_ref()
+                .map_or(false, |output| !output.tool_anomalies.is_empty()),
+            tool_anomalies: cerebellum_output
+                .as_ref()
+                .map(|output| output.tool_anomalies.clone())
+                .unwrap_or_default(),
+            ..input.amygdala
+        };
+        let amy_output = self.amygdala.tick(&amy_input);
 
         let pag_input = PagInput {
             threat: amy_output.threat,
@@ -279,6 +290,10 @@ impl BrainBus {
         let stn_input = StnInput {
             threat: amy_output.threat,
             arousal: lc_output.arousal,
+            tool_side_effects_present: amy_output.vectors.contains(&ThreatVector::ToolSideEffects),
+            cerebellum_divergence: cerebellum_output
+                .as_ref()
+                .map_or(LevelClass::Low, |output| output.divergence),
             ..input.stn
         };
         let stn_output = self.stn.tick(&stn_input);
@@ -286,11 +301,19 @@ impl BrainBus {
         let cerebellum_divergence = cerebellum_output
             .as_ref()
             .map_or(LevelClass::Low, |output| output.divergence);
+        let tool_side_effects_present = amy_output.vectors.contains(&ThreatVector::ToolSideEffects);
 
         let pmrf_input = PmrfInput {
             hold_active: stn_output.hold_active,
             stability: ser_output.stability,
-            divergence: level_max(input.pmrf.divergence, cerebellum_divergence),
+            divergence: level_max(
+                level_max(input.pmrf.divergence, cerebellum_divergence),
+                if tool_side_effects_present {
+                    LevelClass::High
+                } else {
+                    LevelClass::Low
+                },
+            ),
             ..input.pmrf
         };
         let pmrf_output = self.pmrf.tick(&pmrf_input);
@@ -374,6 +397,7 @@ impl BrainBus {
             simulate_first_bias: baseline.chain_conservatism == LevelClass::High,
             approval_strict: baseline.approval_strictness == LevelClass::High,
             novelty_lock_bias: baseline.novelty_dampening == LevelClass::High,
+            cerebellum_divergence,
         });
         merge_secondary_outputs(&mut decision, &lc_output, &ser_output, &sn_output);
         decision
@@ -428,6 +452,11 @@ impl BrainBus {
             sn_output.reason_codes.codes.clone(),
         ]);
 
+        let suspend_recommendations = cerebellum_output
+            .as_ref()
+            .map(|output| output.suspend_recommendations.clone())
+            .unwrap_or_default();
+
         BrainOutput {
             decision,
             emotion_field,
@@ -439,6 +468,7 @@ impl BrainBus {
             dopamin: dopa_output,
             isv: isv_snapshot,
             reason_codes,
+            suspend_recommendations,
         }
     }
 

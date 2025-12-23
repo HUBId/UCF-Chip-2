@@ -3,7 +3,7 @@
 use blake3::Hasher;
 use dbm_12_insula::InsulaInput;
 use dbm_13_hypothalamus::ControlDecision as HypoDecision;
-use dbm_18_cerebellum::CerInput;
+use dbm_18_cerebellum::{CerInput, ToolFailureCounts};
 use dbm_6_dopamin_nacc::DopaInput;
 use dbm_7_lc::LcInput;
 use dbm_8_serotonin::SerInput;
@@ -11,7 +11,7 @@ use dbm_9_amygdala::AmyInput;
 use dbm_bus::{BrainBus, BrainInput};
 use dbm_core::{
     CooldownClass as BrainCooldown, DwmMode, IntegrityState, LevelClass as BrainLevel,
-    OverlaySet as BrainOverlay, ProfileState as BrainProfile,
+    OverlaySet as BrainOverlay, ProfileState as BrainProfile, ThreatVector, ToolKey,
 };
 use dbm_hpa::{Hpa, HpaInput, HpaOutput};
 use dbm_pag::PagInput;
@@ -385,6 +385,8 @@ impl RegulationEngine {
                 receipt_invalid_present: classified.receipt_invalid_count > 0,
                 dlp_critical_present: self.counters.short_dlp_critical_present,
                 integrity: to_brain_integrity(classified.integrity_state),
+                tool_side_effects_present: false,
+                cerebellum_divergence: BrainLevel::Low,
             },
             pmrf: PmrfInput {
                 divergence: to_brain_level(self.rsv.divergence),
@@ -480,13 +482,22 @@ impl RegulationEngine {
         mut decision: ControlDecision,
         brain_output: &dbm_bus::BrainOutput,
     ) -> ControlDecision {
+        let tool_side_effects = brain_output
+            .isv
+            .threat_vectors
+            .as_ref()
+            .map_or(false, |vectors| {
+                vectors.contains(&ThreatVector::ToolSideEffects)
+            });
+
         if matches!(
             brain_output
                 .cerebellum
                 .as_ref()
                 .map(|output| output.divergence),
             Some(BrainLevel::High)
-        ) {
+        ) || tool_side_effects
+        {
             decision.overlays.simulate_first = true;
             decision.overlays.chain_tightening = true;
         }
@@ -938,6 +949,19 @@ fn build_cerebellum_input(
     }
 
     let exec_stats = frame.exec_stats.as_ref();
+    let mut tool_failures = Vec::new();
+    if let Some(stats) = exec_stats {
+        if let Some(tool_id) = &stats.tool_id {
+            tool_failures.push((
+                ToolKey::new(tool_id.clone(), String::new()),
+                ToolFailureCounts {
+                    timeouts: stats.timeout_count,
+                    partial_failures: stats.partial_failure_count,
+                    unavailable: stats.tool_unavailable_count,
+                },
+            ));
+        }
+    }
     Some(CerInput {
         timeout_count_medium: exec_stats.map(|stats| stats.timeout_count).unwrap_or(0),
         partial_failure_count_medium: exec_stats
@@ -950,6 +974,7 @@ fn build_cerebellum_input(
         integrity: to_brain_integrity(classified.integrity_state),
         tool_id: exec_stats.and_then(|stats| stats.tool_id.clone()),
         dlp_block_count_medium: exec_stats.map(|stats| stats.dlp_block_count).unwrap_or(0),
+        tool_failures,
     })
 }
 
@@ -1038,6 +1063,8 @@ fn build_amygdala_input(
         receipt_invalid_medium: counters.medium_receipt_invalid_count,
         policy_pressure: to_brain_level(classified.policy_pressure_class),
         sealed: Some(classified.integrity_state == IntegrityStateClass::Fail),
+        tool_anomaly_present: false,
+        tool_anomalies: Vec::new(),
     }
 }
 

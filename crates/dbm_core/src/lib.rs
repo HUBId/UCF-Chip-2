@@ -127,6 +127,52 @@ pub enum ThreatVector {
     ToolSideEffects,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ToolKey {
+    pub tool_id: String,
+    pub action_id: String,
+}
+
+impl ToolKey {
+    pub const MAX_LEN: usize = 128;
+
+    pub fn new(tool_id: impl Into<String>, action_id: impl Into<String>) -> Self {
+        let mut key = Self {
+            tool_id: tool_id.into(),
+            action_id: action_id.into(),
+        };
+        key.normalize();
+        key
+    }
+
+    pub fn normalized(mut self) -> Self {
+        self.normalize();
+        self
+    }
+
+    fn normalize(&mut self) {
+        if self.tool_id.len() > Self::MAX_LEN {
+            self.tool_id.truncate(Self::MAX_LEN);
+        }
+        if self.action_id.len() > Self::MAX_LEN {
+            self.action_id.truncate(Self::MAX_LEN);
+        }
+    }
+}
+
+impl From<(String, String)> for ToolKey {
+    fn from(value: (String, String)) -> Self {
+        Self::new(value.0, value.1)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SuspendRecommendation {
+    pub tool: ToolKey,
+    pub severity: LevelClass,
+    pub reason_codes: ReasonSet,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OverlaySet {
     pub simulate_first: bool,
@@ -339,5 +385,14 @@ mod tests {
                 "h".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn tool_key_truncates() {
+        let long = "a".repeat(ToolKey::MAX_LEN + 10);
+        let key = ToolKey::new(long.clone(), long.clone());
+
+        assert_eq!(key.tool_id.len(), ToolKey::MAX_LEN);
+        assert_eq!(key.action_id.len(), ToolKey::MAX_LEN);
     }
 }
