@@ -3,7 +3,7 @@
 use blake3::Hasher;
 use dbm_12_insula::InsulaInput;
 use dbm_13_hypothalamus::ControlDecision as HypoDecision;
-use dbm_18_cerebellum::{CerInput, CerOutput};
+use dbm_18_cerebellum::CerInput;
 use dbm_6_dopamin_nacc::DopaInput;
 use dbm_7_lc::LcInput;
 use dbm_8_serotonin::SerInput;
@@ -175,10 +175,10 @@ impl RegulationEngine {
 
     pub fn snapshot(&mut self) -> RegulationSnapshot {
         let now_ms = self.rsv.last_seen_frame_ts_ms.unwrap_or(0);
-        let decision = self.decide_on_missing(now_ms);
+        let (decision, brain_output) = self.decide_on_missing(now_ms);
         let decision = self.apply_forensic_override(decision);
         let decision = self.apply_anti_flapping(decision, now_ms);
-        let (control_frame, _) = self.build_control_frame(decision.clone());
+        let (control_frame, _) = self.build_control_frame(decision.clone(), &brain_output);
         let digest = control_frame
             .control_frame_digest
             .as_ref()
@@ -217,13 +217,13 @@ impl RegulationEngine {
     }
 
     pub fn on_signal_frame(&mut self, frame: ucf::v1::SignalFrame, now_ms: u64) -> ControlFrame {
-        let decision = self.decide_from_frame(frame, now_ms);
-        self.apply_and_render(decision, now_ms)
+        let (decision, brain_output) = self.decide_from_frame(frame, now_ms);
+        self.apply_and_render(decision, &brain_output, now_ms)
     }
 
     pub fn on_tick(&mut self, now_ms: u64) -> ControlFrame {
-        let decision = self.decide_on_missing(now_ms);
-        self.apply_and_render(decision, now_ms)
+        let (decision, brain_output) = self.decide_on_missing(now_ms);
+        self.apply_and_render(decision, &brain_output, now_ms)
     }
 
     pub fn tick(&mut self, now_ms: u64) -> ControlFrame {
@@ -236,8 +236,8 @@ impl RegulationEngine {
 
         for _ in 0..max_to_process {
             if let Some(frame) = self.signal_queue.pop_front() {
-                let decision = self.decide_from_frame(frame, now_ms);
-                control_frame = Some(self.apply_and_render(decision, now_ms));
+                let (decision, brain_output) = self.decide_from_frame(frame, now_ms);
+                control_frame = Some(self.apply_and_render(decision, &brain_output, now_ms));
             }
         }
 
@@ -245,8 +245,8 @@ impl RegulationEngine {
             return control_frame;
         }
 
-        let decision = self.decide_on_missing(now_ms);
-        self.apply_and_render(decision, now_ms)
+        let (decision, brain_output) = self.decide_on_missing(now_ms);
+        self.apply_and_render(decision, &brain_output, now_ms)
     }
 
     pub fn reset_forensic(&mut self) {
@@ -259,7 +259,7 @@ impl RegulationEngine {
         &mut self,
         mut frame: ucf::v1::SignalFrame,
         now_ms: u64,
-    ) -> ControlDecision {
+    ) -> (ControlDecision, dbm_bus::BrainOutput) {
         if frame.timestamp_ms.is_none() {
             frame.timestamp_ms = Some(now_ms);
         }
@@ -270,17 +270,16 @@ impl RegulationEngine {
         self.rsv.update_unlock_state(&frame);
 
         update_window_counters(&mut self.counters, &classified);
-        if classified.window_kind == ucf::v1::WindowKind::Medium {
-            self.brain_bus.pprf_mut().on_medium_window_rollover();
-        }
 
         let previous_dwm = self.brain_bus.current_dwm();
         let brain_output = self.build_and_tick_brain(&frame, &classified, timestamp_ms);
         self.update_rsv_from_brain(&brain_output);
-        self.translate_brain_output(brain_output, previous_dwm, false)
+        let decision = self.translate_brain_output(&brain_output, previous_dwm, false);
+
+        (decision, brain_output)
     }
 
-    fn decide_on_missing(&mut self, now_ms: u64) -> ControlDecision {
+    fn decide_on_missing(&mut self, now_ms: u64) -> (ControlDecision, dbm_bus::BrainOutput) {
         self.rsv.missing_frame_counter = self.rsv.missing_frame_counter.saturating_add(1);
         let classified =
             profiles::classification::ClassifiedSignals::conservative(ucf::v1::WindowKind::Short);
@@ -297,14 +296,13 @@ impl RegulationEngine {
             reason_codes: Vec::new(),
         };
         update_window_counters(&mut self.counters, &classified);
-        if classified.window_kind == ucf::v1::WindowKind::Medium {
-            self.brain_bus.pprf_mut().on_medium_window_rollover();
-        }
 
         let previous_dwm = self.brain_bus.current_dwm();
         let brain_output = self.build_and_tick_brain(&frame, &classified, now_ms);
         self.update_rsv_from_brain(&brain_output);
-        self.translate_brain_output(brain_output, previous_dwm, true)
+        let decision = self.translate_brain_output(&brain_output, previous_dwm, true);
+
+        (decision, brain_output)
     }
 
     fn build_and_tick_brain(
@@ -340,6 +338,12 @@ impl RegulationEngine {
             &self.counters,
             to_brain_level(self.rsv.budget_stress),
         );
+
+        let sc_replay_planned_present = self
+            .brain_bus
+            .last_dopa_output()
+            .map(|output| output.replay_hint)
+            .unwrap_or(false);
 
         let brain_input = BrainInput {
             now_ms,
@@ -398,7 +402,7 @@ impl RegulationEngine {
                 BrainLevel::Low,
             ),
             sc_unlock_present: self.rsv.unlock_ready,
-            sc_replay_planned_present: false,
+            sc_replay_planned_present,
             pprf_cooldown_class: BrainCooldown::Base,
         };
 
@@ -407,18 +411,19 @@ impl RegulationEngine {
 
     fn translate_brain_output(
         &mut self,
-        brain_output: dbm_bus::BrainOutput,
+        brain_output: &dbm_bus::BrainOutput,
         previous_dwm: DwmMode,
         missing_frame: bool,
     ) -> ControlDecision {
-        let mut translated = translate_decision(brain_output.decision, &self.config, missing_frame);
+        let mut translated =
+            translate_decision(brain_output.decision.clone(), &self.config, missing_frame);
 
         let mut reason_set = dbm_core::ReasonSet::default();
         reason_set.extend(brain_output.reason_codes.clone());
         self.extend_reason_codes(&mut translated, &reason_set);
 
-        translated = self.apply_cerebellum_overlays(translated, &brain_output.cerebellum);
-        self.append_dwm_reason_codes(previous_dwm, brain_output.dwm, &mut translated);
+        translated = self.apply_cerebellum_overlays(translated, brain_output);
+        self.append_dwm_reason_codes(previous_dwm, brain_output, &mut translated);
         translated
     }
 
@@ -433,20 +438,27 @@ impl RegulationEngine {
         }
     }
 
-    fn apply_and_render(&mut self, decision: ControlDecision, now_ms: u64) -> ControlFrame {
+    fn apply_and_render(
+        &mut self,
+        decision: ControlDecision,
+        brain_output: &dbm_bus::BrainOutput,
+        now_ms: u64,
+    ) -> ControlFrame {
         let decision = self.apply_forensic_override(decision);
         let decision = self.apply_anti_flapping(decision, now_ms);
-        self.render_control_frame(decision)
+        self.render_control_frame(decision, brain_output)
     }
 
     fn append_dwm_reason_codes(
         &self,
         previous_dwm: DwmMode,
-        new_dwm: DwmMode,
+        brain_output: &dbm_bus::BrainOutput,
         decision: &mut ControlDecision,
     ) {
-        if previous_dwm != new_dwm {
-            decision.profile_reason_codes.push(dwm_reason_code(new_dwm));
+        if previous_dwm != brain_output.dwm {
+            decision
+                .profile_reason_codes
+                .push(dwm_reason_code(brain_output.dwm));
         }
     }
 
@@ -466,10 +478,13 @@ impl RegulationEngine {
     fn apply_cerebellum_overlays(
         &self,
         mut decision: ControlDecision,
-        cerebellum_output: &Option<CerOutput>,
+        brain_output: &dbm_bus::BrainOutput,
     ) -> ControlDecision {
         if matches!(
-            cerebellum_output.as_ref().map(|output| output.divergence),
+            brain_output
+                .cerebellum
+                .as_ref()
+                .map(|output| output.divergence),
             Some(BrainLevel::High)
         ) {
             decision.overlays.simulate_first = true;
@@ -725,8 +740,12 @@ impl RegulationEngine {
         }
     }
 
-    fn render_control_frame(&mut self, decision: ControlDecision) -> ControlFrame {
-        let (control_frame, digest_bytes) = self.build_control_frame(decision);
+    fn render_control_frame(
+        &mut self,
+        decision: ControlDecision,
+        brain_output: &dbm_bus::BrainOutput,
+    ) -> ControlFrame {
+        let (control_frame, digest_bytes) = self.build_control_frame(decision, brain_output);
 
         if let Some(writer) = self.pvgs_writer.as_mut() {
             let _ = writer.commit_control_frame_evidence(
@@ -738,7 +757,11 @@ impl RegulationEngine {
         control_frame
     }
 
-    fn build_control_frame(&self, mut decision: ControlDecision) -> (ControlFrame, [u8; 32]) {
+    fn build_control_frame(
+        &self,
+        mut decision: ControlDecision,
+        brain_output: &dbm_bus::BrainOutput,
+    ) -> (ControlFrame, [u8; 32]) {
         let cbv_digest = self
             .pvgs_reader
             .as_ref()
@@ -756,7 +779,7 @@ impl RegulationEngine {
             .as_ref()
             .and_then(|reader| reader.get_latest_pev());
 
-        let last_baseline_vector = self.brain_bus.last_baseline_vector();
+        let last_baseline_vector = &brain_output.baseline;
 
         if level_at_least(last_baseline_vector.export_strictness, BrainLevel::Med) {
             decision.overlays.export_lock = true;
@@ -2270,7 +2293,7 @@ mod tests {
             cooldown_class: LevelClass::High,
         };
 
-        let control_frame = engine.render_control_frame(decision);
+        let control_frame = engine.render_control_frame(decision, &dbm_bus::BrainOutput::default());
         assert_eq!(
             control_frame.profile_reason_codes,
             vec![

@@ -76,6 +76,7 @@ pub struct BrainBus {
     emotion_field: EmotionFieldModule,
     current_dwm: DwmMode,
     current_target: OrientTarget,
+    last_window_kind: Option<WindowKind>,
     last_cerebellum_output: Option<dbm_18_cerebellum::CerOutput>,
     last_dopa_output: Option<DopaOutput>,
     last_hpa_output: HpaOutput,
@@ -222,6 +223,10 @@ impl BrainBus {
 
     pub fn tick(&mut self, input: BrainInput) -> BrainOutput {
         let medium_window = input.window_kind == WindowKind::Medium;
+        if medium_window && self.last_window_kind != Some(WindowKind::Medium) {
+            self.pprf.on_medium_window_rollover();
+        }
+        self.last_window_kind = Some(input.window_kind);
 
         let hpa_output = if medium_window {
             let output = self.hpa.tick(&input.hpa);
