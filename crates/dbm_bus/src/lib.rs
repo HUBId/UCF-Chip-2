@@ -93,7 +93,12 @@ impl BrainBus {
         let lc_input = LcInput {
             arousal_floor: level_max(
                 input.lc.arousal_floor,
-                level_max(baseline.caution_floor, cerebellum_output.as_ref().map_or(LevelClass::Low, |c| c.divergence)),
+                level_max(
+                    baseline.caution_floor,
+                    cerebellum_output
+                        .as_ref()
+                        .map_or(LevelClass::Low, |c| c.divergence),
+                ),
             ),
             ..input.lc
         };
@@ -141,7 +146,9 @@ impl BrainBus {
 
         let mut insula_input = input.insula;
         insula_input.hbv_present = true;
-        insula_input.dominant_reason_codes.extend(amy_output.reason_codes.codes.clone());
+        insula_input
+            .dominant_reason_codes
+            .extend(amy_output.reason_codes.codes.clone());
         insula_input
             .dominant_reason_codes
             .extend(pag_output.reason_codes.codes.clone());
@@ -360,6 +367,9 @@ mod tests {
             vec!["b".to_string(), "a".to_string()],
             vec!["a".to_string(), "c".to_string()],
         ]);
-        assert_eq!(codes, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            codes,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
     }
 }
