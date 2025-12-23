@@ -486,9 +486,7 @@ impl RegulationEngine {
             .isv
             .threat_vectors
             .as_ref()
-            .map_or(false, |vectors| {
-                vectors.contains(&ThreatVector::ToolSideEffects)
-            });
+            .is_some_and(|vectors| vectors.contains(&ThreatVector::ToolSideEffects));
 
         if matches!(
             brain_output
