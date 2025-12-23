@@ -1,47 +1,86 @@
 #![forbid(unsafe_code)]
 
-use dbm_core::{CooldownClass, DbmModule, IntegrityState, LevelClass, ReasonSet};
+use dbm_core::DbmModule;
+#[cfg(feature = "microcircuit-serotonin")]
+use microcircuit_core::CircuitConfig;
+use microcircuit_core::MicrocircuitBackend;
+pub use microcircuit_serotonin_stub::{SerInput, SerOutput, SerRules};
+use std::fmt;
 
-#[derive(Debug, Clone, Default)]
-pub struct SerInput {
-    pub integrity: IntegrityState,
-    pub replay_mismatch_present: bool,
-    pub receipt_invalid_count_medium: u32,
-    pub dlp_critical_count_medium: u32,
-    pub flapping_count_medium: u32,
-    pub unlock_present: bool,
-    pub stability_floor: LevelClass,
+pub enum SerBackend {
+    Rules(SerRules),
+    Micro(Box<dyn MicrocircuitBackend<SerInput, SerOutput>>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SerOutput {
-    pub stability: LevelClass,
-    pub cooldown_class: CooldownClass,
-    pub deescalation_lock: bool,
-    pub reason_codes: ReasonSet,
-}
-
-impl Default for SerOutput {
-    fn default() -> Self {
-        Self {
-            stability: LevelClass::Low,
-            cooldown_class: CooldownClass::Base,
-            deescalation_lock: false,
-            reason_codes: ReasonSet::default(),
+impl fmt::Debug for SerBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SerBackend::Rules(_) => f.write_str("SerBackend::Rules"),
+            SerBackend::Micro(_) => f.write_str("SerBackend::Micro"),
         }
     }
 }
 
-#[derive(Debug, Default)]
+impl SerBackend {
+    fn tick(&mut self, input: &SerInput) -> SerOutput {
+        match self {
+            SerBackend::Rules(rules) => rules.tick(input),
+            SerBackend::Micro(backend) => backend.step(input, 0),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Serotonin {
-    stability_current: LevelClass,
-    stable_windows: u32,
-    last_was_high: bool,
+    backend: SerBackend,
 }
 
 impl Serotonin {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            backend: SerBackend::Rules(SerRules::new()),
+        }
+    }
+
+    #[cfg(feature = "microcircuit-serotonin-attractor")]
+    pub fn new_micro(config: CircuitConfig) -> Self {
+        use microcircuit_serotonin_attractor::SerAttractorMicrocircuit;
+
+        Self {
+            backend: SerBackend::Micro(Box::new(SerAttractorMicrocircuit::new(config))),
+        }
+    }
+
+    #[cfg(all(
+        feature = "microcircuit-serotonin",
+        not(feature = "microcircuit-serotonin-attractor")
+    ))]
+    pub fn new_micro(config: CircuitConfig) -> Self {
+        use microcircuit_serotonin_stub::SerMicrocircuit;
+
+        Self {
+            backend: SerBackend::Micro(Box::new(SerMicrocircuit::new(config))),
+        }
+    }
+
+    pub fn snapshot_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            SerBackend::Micro(backend) => Some(backend.snapshot_digest()),
+            SerBackend::Rules(_) => None,
+        }
+    }
+
+    pub fn config_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            SerBackend::Micro(backend) => Some(backend.config_digest()),
+            SerBackend::Rules(_) => None,
+        }
+    }
+}
+
+impl Default for Serotonin {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -50,102 +89,14 @@ impl DbmModule for Serotonin {
     type Output = SerOutput;
 
     fn tick(&mut self, input: &Self::Input) -> Self::Output {
-        let mut reason_codes = ReasonSet::default();
-        let mut desired = if input.integrity != IntegrityState::Ok
-            || input.replay_mismatch_present
-            || input.receipt_invalid_count_medium >= 1
-            || input.dlp_critical_count_medium >= 5
-            || input.flapping_count_medium >= 6
-        {
-            reason_codes.insert("ser_high_trigger");
-            LevelClass::High
-        } else if input.flapping_count_medium >= 2 || input.dlp_critical_count_medium >= 1 {
-            reason_codes.insert("ser_med_trigger");
-            LevelClass::Med
-        } else {
-            LevelClass::Low
-        };
-
-        fn severity(level: LevelClass) -> u8 {
-            match level {
-                LevelClass::Low => 0,
-                LevelClass::Med => 1,
-                LevelClass::High => 2,
-            }
-        }
-
-        if severity(desired) < severity(input.stability_floor) {
-            desired = input.stability_floor;
-            reason_codes.insert("ser_floor");
-        }
-
-        let mut stability = self.stability_current;
-
-        if stability == LevelClass::High && desired != LevelClass::High {
-            if self.stable_windows >= 3 {
-                stability = LevelClass::Med;
-            }
-        } else if stability == LevelClass::Med && desired == LevelClass::Low {
-            if self.stable_windows >= 5 {
-                stability = LevelClass::Low;
-            }
-        } else {
-            stability = desired;
-        }
-
-        if desired == LevelClass::Low
-            && input.integrity == IntegrityState::Ok
-            && input.receipt_invalid_count_medium == 0
-            && !input.replay_mismatch_present
-        {
-            self.stable_windows = self.stable_windows.saturating_add(1);
-        } else {
-            self.stable_windows = 0;
-        }
-
-        self.stability_current = stability.max(desired);
-        self.last_was_high = desired == LevelClass::High;
-
-        let cooldown_class =
-            if self.stability_current == LevelClass::High || input.flapping_count_medium >= 2 {
-                CooldownClass::Longer
-            } else {
-                CooldownClass::Base
-            };
-
-        let mut deescalation_lock = self.stability_current == LevelClass::High;
-        if !input.unlock_present && input.integrity == IntegrityState::Fail {
-            deescalation_lock = true;
-            reason_codes.insert("ser_forensic_latch");
-        }
-
-        SerOutput {
-            stability: self.stability_current,
-            cooldown_class,
-            deescalation_lock,
-            reason_codes,
-        }
-    }
-}
-
-trait LevelClassExt {
-    fn max(self, other: Self) -> Self;
-}
-
-impl LevelClassExt for LevelClass {
-    fn max(self, other: Self) -> Self {
-        use LevelClass::*;
-        match (self, other) {
-            (High, _) | (_, High) => High,
-            (Med, _) | (_, Med) => Med,
-            _ => Low,
-        }
+        self.backend.tick(input)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dbm_core::{CooldownClass, IntegrityState, LevelClass};
 
     fn base_input() -> SerInput {
         SerInput {

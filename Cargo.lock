@@ -142,6 +142,9 @@ name = "dbm_8_serotonin"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
+ "microcircuit_core",
+ "microcircuit_serotonin_attractor",
+ "microcircuit_serotonin_stub",
 ]
 
 [[package]]
@@ -358,6 +361,23 @@ dependencies = [
 
 [[package]]
 name = "microcircuit_lc_stub"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "microcircuit_core",
+]
+
+[[package]]
+name = "microcircuit_serotonin_attractor"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_serotonin_stub",
+]
+
+[[package]]
+name = "microcircuit_serotonin_stub"
 version = "0.1.0"
 dependencies = [
  "dbm_core",

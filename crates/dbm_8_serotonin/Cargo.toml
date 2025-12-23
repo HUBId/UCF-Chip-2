@@ -6,5 +6,12 @@ edition = "2021"
 [lib]
 path = "src/lib.rs"
 
+[features]
+microcircuit-serotonin = []
+microcircuit-serotonin-attractor = ["microcircuit-serotonin", "microcircuit_serotonin_attractor"]
+
 [dependencies]
 dbm_core = { path = "../dbm_core" }
+microcircuit_core = { path = "../microcircuit_core" }
+microcircuit_serotonin_attractor = { path = "../microcircuit_serotonin_attractor", optional = true }
+microcircuit_serotonin_stub = { path = "../microcircuit_serotonin_stub" }
