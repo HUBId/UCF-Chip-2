@@ -1,39 +1,29 @@
 #![forbid(unsafe_code)]
 
-use blake3::Hasher;
-use dbm_12_insula::InsulaInput;
 use dbm_13_hypothalamus::ControlDecision as HypoDecision;
-use dbm_18_cerebellum::{CerInput, ToolFailureCounts};
-use dbm_6_dopamin_nacc::DopaInput;
-use dbm_7_lc::LcInput;
-use dbm_8_serotonin::SerInput;
-use dbm_9_amygdala::AmyInput;
-use dbm_bus::{BrainBus, BrainInput};
+use dbm_bus::BrainBus;
 use dbm_core::{
-    CooldownClass as BrainCooldown, DwmMode, IntegrityState, LevelClass as BrainLevel,
-    OverlaySet as BrainOverlay, ProfileState as BrainProfile, ThreatVector, ToolKey,
+    DwmMode, IntegrityState, LevelClass as BrainLevel, OverlaySet as BrainOverlay,
+    ProfileState as BrainProfile, ThreatVector,
 };
-use dbm_hpa::{Hpa, HpaInput, HpaOutput};
-use dbm_pag::PagInput;
-use dbm_pmrf::PmrfInput;
-use dbm_stn::StnInput;
+use dbm_hpa::{Hpa, HpaOutput};
 use profiles::{
-    apply_cbv_modifiers, apply_classification, apply_pev_modifiers, classify_signal_frame,
-    ControlDecision, FlappingPenaltyMode, OverlaySet, ProfileState, RegulationConfig,
+    apply_classification, classify_signal_frame, ControlDecision, FlappingPenaltyMode, OverlaySet,
+    ProfileState, RegulationConfig,
 };
-use prost::Message;
 use pvgs_client::{PvgsReader, PvgsWriter};
 use rsv::RsvState;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 #[cfg(test)]
 use std::time::SystemTime;
-use ucf::v1::{
-    ActiveProfile, ControlFrame, IntegrityStateClass, LevelClass, Overlays, ReasonCode,
-    ToolClassMask,
-};
+use ucf::v1::{ControlFrame, IntegrityStateClass, LevelClass, ReasonCode, ToolClassMask};
 
-const CONTROL_FRAME_DOMAIN: &str = "UCF:HASH:CONTROL_FRAME";
+mod proto_bridge;
+pub use proto_bridge::{
+    brain_input_from_signal_frame, control_frame_from_brain_output, BaselineContext,
+    ControlFrameContext,
+};
 
 #[derive(Debug)]
 pub enum EngineError {
@@ -53,7 +43,7 @@ impl std::fmt::Display for EngineError {
 impl std::error::Error for EngineError {}
 
 #[derive(Debug, Default)]
-struct AntiFlappingState {
+pub(crate) struct AntiFlappingState {
     last_profile_change_ms: Option<u64>,
     last_overlay_change_ms: Option<u64>,
     switch_count_medium_window: u32,
@@ -63,7 +53,7 @@ struct AntiFlappingState {
 }
 
 #[derive(Debug, Default)]
-struct WindowCounters {
+pub struct WindowCounters {
     short_receipt_invalid_count: u32,
     short_receipt_missing_count: u32,
     short_dlp_critical_present: bool,
@@ -331,82 +321,28 @@ impl RegulationEngine {
             .and_then(|reader| reader.get_latest_pev_digest())
             .is_some();
 
-        let dopamin_input = build_dopa_input(
-            frame,
-            classified,
-            BrainLevel::Low,
-            &self.counters,
-            to_brain_level(self.rsv.budget_stress),
-        );
-
         let sc_replay_planned_present = self
             .brain_bus
             .last_dopa_output()
             .map(|output| output.replay_hint)
             .unwrap_or(false);
 
-        let brain_input = BrainInput {
-            now_ms,
-            window_kind: classified.window_kind,
-            hpa: build_hpa_input(classified, &self.counters, self.rsv.unlock_ready),
+        let baselines = BaselineContext {
             cbv,
+            cbv_present,
             pev,
-            lc: LcInput {
-                integrity: to_brain_integrity(classified.integrity_state),
-                receipt_invalid_count_short: self.counters.short_receipt_invalid_count,
-                receipt_missing_count_short: self.counters.short_receipt_missing_count,
-                dlp_critical_present_short: self.counters.short_dlp_critical_present,
-                timeout_count_short: self.counters.short_timeout_count,
-                deny_count_short: self.counters.short_deny_count,
-                arousal_floor: BrainLevel::Low,
-            },
-            serotonin: SerInput {
-                integrity: to_brain_integrity(classified.integrity_state),
-                replay_mismatch_present: self.counters.medium_replay_mismatch,
-                receipt_invalid_count_medium: self.counters.medium_receipt_invalid_count,
-                dlp_critical_count_medium: self.counters.medium_dlp_critical_count,
-                flapping_count_medium: self.counters.medium_flapping_count,
-                unlock_present: self.rsv.unlock_ready,
-                stability_floor: BrainLevel::Low,
-            },
-            amygdala: build_amygdala_input(frame, classified, &self.counters),
-            pag: PagInput {
-                integrity: to_brain_integrity(classified.integrity_state),
-                threat: BrainLevel::Low,
-                vectors: Vec::new(),
-                unlock_present: self.rsv.unlock_ready,
-                stability: BrainLevel::Low,
-            },
-            cerebellum: build_cerebellum_input(frame, classified),
-            stn: StnInput {
-                policy_pressure: to_brain_level(classified.policy_pressure_class),
-                arousal: BrainLevel::Low,
-                threat: BrainLevel::Low,
-                receipt_invalid_present: classified.receipt_invalid_count > 0,
-                dlp_critical_present: self.counters.short_dlp_critical_present,
-                integrity: to_brain_integrity(classified.integrity_state),
-                tool_side_effects_present: false,
-                cerebellum_divergence: BrainLevel::Low,
-            },
-            pmrf: PmrfInput {
-                divergence: to_brain_level(self.rsv.divergence),
-                policy_pressure: to_brain_level(classified.policy_pressure_class),
-                stability: BrainLevel::Low,
-                hold_active: false,
-                budget_stress: to_brain_level(self.rsv.budget_stress),
-            },
-            dopamin: dopamin_input,
-            insula: build_insula_input(
-                frame,
-                classified,
-                cbv_present,
-                pev_present,
-                BrainLevel::Low,
-            ),
-            sc_unlock_present: self.rsv.unlock_ready,
-            sc_replay_planned_present,
-            pprf_cooldown_class: BrainCooldown::Base,
+            pev_present,
         };
+
+        let brain_input = brain_input_from_signal_frame(
+            frame,
+            classified,
+            &self.counters,
+            &self.rsv,
+            baselines,
+            sc_replay_planned_present,
+            now_ms,
+        );
 
         self.brain_bus.tick(brain_input)
     }
@@ -768,13 +704,14 @@ impl RegulationEngine {
 
     fn build_control_frame(
         &self,
-        mut decision: ControlDecision,
+        decision: ControlDecision,
         brain_output: &dbm_bus::BrainOutput,
     ) -> (ControlFrame, [u8; 32]) {
         let cbv_digest = self
             .pvgs_reader
             .as_ref()
-            .and_then(|reader| reader.get_latest_cbv_digest());
+            .and_then(|reader| reader.get_latest_cbv_digest())
+            .map(|digest| digest.to_vec());
         let cbv = self
             .pvgs_reader
             .as_ref()
@@ -782,88 +719,22 @@ impl RegulationEngine {
         let pev_digest = self
             .pvgs_reader
             .as_ref()
-            .and_then(|reader| reader.get_latest_pev_digest());
+            .and_then(|reader| reader.get_latest_pev_digest())
+            .map(|digest| digest.to_vec());
         let pev = self
             .pvgs_reader
             .as_ref()
             .and_then(|reader| reader.get_latest_pev());
 
-        let last_baseline_vector = &brain_output.baseline;
-
-        if level_at_least(last_baseline_vector.export_strictness, BrainLevel::Med) {
-            decision.overlays.export_lock = true;
-        }
-
-        if level_at_least(last_baseline_vector.chain_conservatism, BrainLevel::High) {
-            decision.overlays.simulate_first = true;
-        }
-
-        if level_at_least(last_baseline_vector.approval_strictness, BrainLevel::Med) {
-            decision.approval_mode = self.config.character_baselines.strict_approval_mode.clone();
-        }
-
-        if level_at_least(last_baseline_vector.novelty_dampening, BrainLevel::Med) {
-            decision.overlays.novelty_lock = true;
-        }
-
-        if cbv_digest.is_some()
-            && self.config.character_baselines.cbv_influence_enabled
-            && self.config.character_baselines.novelty_lock_on_cbv
-        {
-            decision.overlays.novelty_lock = true;
-        }
-
-        if cbv_digest.is_some() && self.config.character_baselines.cbv_influence_enabled {
-            decision.approval_mode = self.config.character_baselines.strict_approval_mode.clone();
-        }
-
-        let decision = apply_cbv_modifiers(decision, cbv);
-        let decision = apply_pev_modifiers(decision, pev);
-
-        let overlays = Overlays {
-            simulate_first: decision.overlays.simulate_first,
-            export_lock: decision.overlays.export_lock,
-            novelty_lock: decision.overlays.novelty_lock,
-            chain_tightening: decision.overlays.chain_tightening,
+        let context = ControlFrameContext {
+            cbv,
+            cbv_digest,
+            pev,
+            pev_digest,
+            forensic_latched: self.rsv.forensic_latched,
         };
 
-        let profile = ActiveProfile {
-            profile: decision.profile.as_str().to_string(),
-        };
-
-        let toolclass_mask_config = self.toolclass_mask_for(&decision);
-
-        let mut profile_reason_codes: Vec<i32> = decision
-            .profile_reason_codes
-            .iter()
-            .map(|code| *code as i32)
-            .collect();
-        profile_reason_codes.sort();
-
-        let mut control_frame = ControlFrame {
-            active_profile: Some(profile),
-            overlays: Some(overlays),
-            toolclass_mask: Some(toolclass_mask_config),
-            profile_reason_codes,
-            control_frame_digest: None,
-            character_epoch_digest: cbv_digest.map(|digest| digest.to_vec()),
-            policy_ecology_digest: pev_digest.map(|digest| digest.to_vec()),
-            approval_mode: Some(decision.approval_mode.clone()),
-            deescalation_lock: decision.deescalation_lock.then_some(true),
-            cooldown_class: Some(decision.cooldown_class as i32),
-        };
-
-        let mut buf = Vec::new();
-        control_frame.encode(&mut buf).unwrap();
-
-        let mut hasher = Hasher::new_derive_key(CONTROL_FRAME_DOMAIN);
-        hasher.update(&buf);
-        let digest = hasher.finalize();
-        let digest_bytes: [u8; 32] = *digest.as_bytes();
-
-        control_frame.control_frame_digest = Some(digest_bytes.to_vec());
-
-        (control_frame, digest_bytes)
+        control_frame_from_brain_output(decision, brain_output, &self.config, context)
     }
 
     fn rsv_summary(&self) -> RsvSummary {
@@ -875,195 +746,44 @@ impl RegulationEngine {
             stability: self.rsv.stability,
         }
     }
-
-    fn toolclass_mask_for(&self, decision: &ControlDecision) -> ToolClassMask {
-        if self.rsv.forensic_latched {
-            return ToolClassMask {
-                read: true,
-                write: false,
-                execute: false,
-                transform: true,
-                export: false,
-            };
-        }
-
-        let mut mask_cfg = self
-            .config
-            .profiles
-            .get(decision.profile)
-            .toolclass_mask
-            .clone();
-
-        if decision.overlays.simulate_first {
-            if let Some(overlay_mask) = &self.config.overlays.simulate_first.toolclass_mask {
-                mask_cfg = mask_cfg.merge_overlay(overlay_mask);
-            }
-        }
-
-        if decision.overlays.export_lock {
-            if let Some(overlay_mask) = &self.config.overlays.export_lock.toolclass_mask {
-                mask_cfg = mask_cfg.merge_overlay(overlay_mask);
-            }
-        }
-
-        if decision.overlays.novelty_lock {
-            if let Some(overlay_mask) = &self.config.overlays.novelty_lock.toolclass_mask {
-                mask_cfg = mask_cfg.merge_overlay(overlay_mask);
-            }
-        }
-
-        mask_cfg.to_tool_class_mask()
-    }
 }
 
-fn build_insula_input(
-    frame: &ucf::v1::SignalFrame,
-    classified: &profiles::classification::ClassifiedSignals,
-    cbv_present: bool,
-    pev_present: bool,
-    progress: BrainLevel,
-) -> InsulaInput {
-    InsulaInput {
-        policy_pressure: to_brain_level(classified.policy_pressure_class),
-        receipt_failures: to_brain_level(classified.receipt_failures_class),
-        receipt_invalid_present: classified.receipt_invalid_count > 0,
-        exec_reliability: to_brain_level(classified.exec_reliability_class),
-        integrity: to_brain_integrity(classified.integrity_state),
-        timeout_burst: classified.exec_timeout_count > 0,
-        cbv_present,
-        pev_present,
-        hbv_present: false,
-        progress,
-        dominant_reason_codes: convert_reason_codes(&frame.reason_codes),
-    }
-}
-
-fn build_cerebellum_input(
-    frame: &ucf::v1::SignalFrame,
-    classified: &profiles::classification::ClassifiedSignals,
-) -> Option<CerInput> {
-    if classified.window_kind != ucf::v1::WindowKind::Medium {
-        return None;
+pub(crate) fn toolclass_mask_for(
+    config: &RegulationConfig,
+    decision: &ControlDecision,
+    forensic_latched: bool,
+) -> ToolClassMask {
+    if forensic_latched {
+        return ToolClassMask {
+            read: true,
+            write: false,
+            execute: false,
+            transform: true,
+            export: false,
+        };
     }
 
-    let exec_stats = frame.exec_stats.as_ref();
-    let mut tool_failures = Vec::new();
-    if let Some(stats) = exec_stats {
-        if let Some(tool_id) = &stats.tool_id {
-            tool_failures.push((
-                ToolKey::new(tool_id.clone(), String::new()),
-                ToolFailureCounts {
-                    timeouts: stats.timeout_count,
-                    partial_failures: stats.partial_failure_count,
-                    unavailable: stats.tool_unavailable_count,
-                },
-            ));
+    let mut mask_cfg = config.profiles.get(decision.profile).toolclass_mask.clone();
+
+    if decision.overlays.simulate_first {
+        if let Some(overlay_mask) = &config.overlays.simulate_first.toolclass_mask {
+            mask_cfg = mask_cfg.merge_overlay(overlay_mask);
         }
     }
-    Some(CerInput {
-        timeout_count_medium: exec_stats.map(|stats| stats.timeout_count).unwrap_or(0),
-        partial_failure_count_medium: exec_stats
-            .map(|stats| stats.partial_failure_count)
-            .unwrap_or(0),
-        tool_unavailable_count_medium: exec_stats
-            .map(|stats| stats.tool_unavailable_count)
-            .unwrap_or(0),
-        receipt_invalid_present: classified.receipt_invalid_count > 0,
-        integrity: to_brain_integrity(classified.integrity_state),
-        tool_id: exec_stats.and_then(|stats| stats.tool_id.clone()),
-        dlp_block_count_medium: exec_stats.map(|stats| stats.dlp_block_count).unwrap_or(0),
-        tool_failures,
-    })
-}
 
-fn build_hpa_input(
-    classified: &profiles::classification::ClassifiedSignals,
-    counters: &WindowCounters,
-    unlock_ready: bool,
-) -> HpaInput {
-    use ucf::v1::{IntegrityStateClass, LevelClass, WindowKind};
-
-    let stable_medium_window = classified.window_kind == WindowKind::Medium
-        && classified.integrity_state == IntegrityStateClass::Ok
-        && classified.receipt_invalid_count == 0
-        && classified.replay_mismatch_class != LevelClass::High
-        && classified.dlp_severity_class != LevelClass::High;
-
-    HpaInput {
-        integrity_state: to_brain_integrity(classified.integrity_state),
-        replay_mismatch_present: counters.medium_replay_mismatch,
-        dlp_critical_present: counters.medium_dlp_critical_count > 0,
-        receipt_invalid_present: counters.medium_receipt_invalid_count > 0,
-        deny_storm_present: classified.policy_deny_count >= 5,
-        timeouts_burst_present: classified.exec_timeout_count >= 2,
-        unlock_present: unlock_ready,
-        stable_medium_window,
-    }
-}
-
-fn build_dopa_input(
-    frame: &ucf::v1::SignalFrame,
-    classified: &profiles::classification::ClassifiedSignals,
-    threat: BrainLevel,
-    counters: &WindowCounters,
-    budget_stress: BrainLevel,
-) -> Option<DopaInput> {
-    use ucf::v1::WindowKind;
-
-    if classified.window_kind != WindowKind::Medium {
-        return None;
+    if decision.overlays.export_lock {
+        if let Some(overlay_mask) = &config.overlays.export_lock.toolclass_mask {
+            mask_cfg = mask_cfg.merge_overlay(overlay_mask);
+        }
     }
 
-    let exec_stats = frame.exec_stats.as_ref();
-    let exec_failure_count_medium = exec_stats
-        .map(|stats| {
-            stats
-                .timeout_count
-                .saturating_add(stats.partial_failure_count)
-                .saturating_add(stats.tool_unavailable_count)
-                .saturating_add(stats.dlp_block_count)
-        })
-        .unwrap_or(0);
-    let exec_success_count_medium = frame
-        .policy_stats
-        .as_ref()
-        .map(|stats| stats.allow_count)
-        .unwrap_or(classified.policy_allow_count);
-
-    Some(DopaInput {
-        integrity: to_brain_integrity(classified.integrity_state),
-        threat,
-        policy_pressure: to_brain_level(classified.policy_pressure_class),
-        receipt_invalid_present: classified.receipt_invalid_count > 0,
-        dlp_critical_present: counters.medium_dlp_critical_count > 0,
-        replay_mismatch_present: counters.medium_replay_mismatch,
-        exec_success_count_medium,
-        exec_failure_count_medium,
-        deny_count_medium: classified.policy_deny_count,
-        budget_stress,
-        macro_finalized_count_long: 0,
-    })
-}
-
-fn build_amygdala_input(
-    frame: &ucf::v1::SignalFrame,
-    classified: &profiles::classification::ClassifiedSignals,
-    counters: &WindowCounters,
-) -> AmyInput {
-    let (dlp_secret_present, dlp_obfuscation_present, dlp_stegano_present) = dlp_flags(frame);
-
-    AmyInput {
-        integrity: to_brain_integrity(classified.integrity_state),
-        replay_mismatch_present: counters.medium_replay_mismatch,
-        dlp_secret_present,
-        dlp_obfuscation_present,
-        dlp_stegano_present,
-        receipt_invalid_medium: counters.medium_receipt_invalid_count,
-        policy_pressure: to_brain_level(classified.policy_pressure_class),
-        sealed: Some(classified.integrity_state == IntegrityStateClass::Fail),
-        tool_anomaly_present: false,
-        tool_anomalies: Vec::new(),
+    if decision.overlays.novelty_lock {
+        if let Some(overlay_mask) = &config.overlays.novelty_lock.toolclass_mask {
+            mask_cfg = mask_cfg.merge_overlay(overlay_mask);
+        }
     }
+
+    mask_cfg.to_tool_class_mask()
 }
 
 fn level_severity(level: BrainLevel) -> u8 {
@@ -1074,16 +794,8 @@ fn level_severity(level: BrainLevel) -> u8 {
     }
 }
 
-fn level_at_least(level: BrainLevel, threshold: BrainLevel) -> bool {
+pub(crate) fn level_at_least(level: BrainLevel, threshold: BrainLevel) -> bool {
     level_severity(level) >= level_severity(threshold)
-}
-
-fn convert_reason_codes(codes: &[i32]) -> Vec<String> {
-    codes
-        .iter()
-        .filter_map(|code| ucf::v1::ReasonCode::try_from(*code).ok())
-        .map(|code| format!("{:?}", code))
-        .collect()
 }
 
 fn init_hpa() -> (Hpa, HpaOutput) {
@@ -1118,7 +830,7 @@ fn init_hpa() -> (Hpa, HpaOutput) {
     }
 }
 
-fn dlp_flags(frame: &ucf::v1::SignalFrame) -> (bool, bool, bool) {
+pub(crate) fn dlp_flags(frame: &ucf::v1::SignalFrame) -> (bool, bool, bool) {
     (
         frame_has_reason(frame, ReasonCode::RcCdDlpSecretPattern),
         frame_has_reason(frame, ReasonCode::RcCdDlpObfuscation),
@@ -1175,7 +887,7 @@ fn update_window_counters(
     }
 }
 
-fn to_brain_level(level: ucf::v1::LevelClass) -> BrainLevel {
+pub(crate) fn to_brain_level(level: ucf::v1::LevelClass) -> BrainLevel {
     match level {
         ucf::v1::LevelClass::High => BrainLevel::High,
         ucf::v1::LevelClass::Med => BrainLevel::Med,
@@ -1183,7 +895,7 @@ fn to_brain_level(level: ucf::v1::LevelClass) -> BrainLevel {
     }
 }
 
-fn to_brain_integrity(state: ucf::v1::IntegrityStateClass) -> IntegrityState {
+pub(crate) fn to_brain_integrity(state: ucf::v1::IntegrityStateClass) -> IntegrityState {
     match state {
         ucf::v1::IntegrityStateClass::Fail => IntegrityState::Fail,
         ucf::v1::IntegrityStateClass::Degraded => IntegrityState::Degraded,
@@ -2283,7 +1995,7 @@ mod tests {
             cooldown_class: LevelClass::Low,
         };
 
-        let mask = engine.toolclass_mask_for(&decision);
+        let mask = toolclass_mask_for(&engine.config, &decision, engine.rsv.forensic_latched);
         assert!(!mask.export);
         assert!(mask.read);
     }
