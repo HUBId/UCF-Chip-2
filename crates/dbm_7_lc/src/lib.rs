@@ -1,51 +1,25 @@
 #![forbid(unsafe_code)]
 
 use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet};
-
-#[derive(Debug, Clone, Default)]
-pub struct LcInput {
-    pub integrity: IntegrityState,
-    pub receipt_invalid_count_short: u32,
-    pub receipt_missing_count_short: u32,
-    pub dlp_critical_present_short: bool,
-    pub timeout_count_short: u32,
-    pub deny_count_short: u32,
-    pub arousal_floor: LevelClass,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LcOutput {
-    pub arousal: LevelClass,
-    pub hint_simulate_first: bool,
-    pub hint_novelty_lock: bool,
-    pub reason_codes: ReasonSet,
-}
-
-impl Default for LcOutput {
-    fn default() -> Self {
-        Self {
-            arousal: LevelClass::Low,
-            hint_simulate_first: false,
-            hint_novelty_lock: false,
-            reason_codes: ReasonSet::default(),
-        }
-    }
-}
+#[cfg(feature = "microcircuit-lc")]
+use microcircuit_core::CircuitConfig;
+use microcircuit_core::MicrocircuitBackend;
+pub use microcircuit_lc_stub::{LcInput, LcOutput};
+use std::fmt;
 
 #[derive(Debug, Default)]
-pub struct Lc {}
+pub struct LcRules;
 
-impl Lc {
-    pub fn new() -> Self {
-        Self {}
+impl LcRules {
+    fn severity(level: LevelClass) -> u8 {
+        match level {
+            LevelClass::Low => 0,
+            LevelClass::Med => 1,
+            LevelClass::High => 2,
+        }
     }
-}
 
-impl DbmModule for Lc {
-    type Input = LcInput;
-    type Output = LcOutput;
-
-    fn tick(&mut self, input: &Self::Input) -> Self::Output {
+    fn tick(&mut self, input: &LcInput) -> LcOutput {
         let mut reason_codes = ReasonSet::default();
 
         let mut arousal = if input.integrity != IntegrityState::Ok
@@ -65,15 +39,7 @@ impl DbmModule for Lc {
             LevelClass::Low
         };
 
-        fn severity(level: LevelClass) -> u8 {
-            match level {
-                LevelClass::Low => 0,
-                LevelClass::Med => 1,
-                LevelClass::High => 2,
-            }
-        }
-
-        if severity(arousal) < severity(input.arousal_floor) {
+        if Self::severity(arousal) < Self::severity(input.arousal_floor) {
             arousal = input.arousal_floor;
             reason_codes.insert("lc_floor");
         }
@@ -90,6 +56,66 @@ impl DbmModule for Lc {
             hint_novelty_lock,
             reason_codes,
         }
+    }
+}
+
+pub enum LcBackend {
+    Rules(LcRules),
+    Micro(Box<dyn MicrocircuitBackend<LcInput, LcOutput>>),
+}
+
+impl fmt::Debug for LcBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LcBackend::Rules(_) => f.write_str("LcBackend::Rules"),
+            LcBackend::Micro(_) => f.write_str("LcBackend::Micro"),
+        }
+    }
+}
+
+impl LcBackend {
+    fn tick(&mut self, input: &LcInput) -> LcOutput {
+        match self {
+            LcBackend::Rules(rules) => rules.tick(input),
+            LcBackend::Micro(backend) => backend.step(input, 0),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Lc {
+    backend: LcBackend,
+}
+
+impl Lc {
+    pub fn new() -> Self {
+        Self {
+            backend: LcBackend::Rules(LcRules::default()),
+        }
+    }
+
+    #[cfg(feature = "microcircuit-lc")]
+    pub fn new_micro(config: CircuitConfig) -> Self {
+        use microcircuit_lc_stub::LcMicrocircuit;
+
+        Self {
+            backend: LcBackend::Micro(Box::new(LcMicrocircuit::new(config))),
+        }
+    }
+}
+
+impl Default for Lc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DbmModule for Lc {
+    type Input = LcInput;
+    type Output = LcOutput;
+
+    fn tick(&mut self, input: &Self::Input) -> Self::Output {
+        self.backend.tick(input)
     }
 }
 
@@ -152,5 +178,38 @@ mod tests {
 
         assert_eq!(output.arousal, LevelClass::Med);
         assert!(output.reason_codes.codes.contains(&"lc_floor".to_string()));
+    }
+
+    #[cfg(feature = "microcircuit-lc")]
+    #[test]
+    fn micro_backend_matches_rules() {
+        use microcircuit_lc_stub::LcMicrocircuit;
+
+        let mut rules = Lc::new();
+        let mut micro = Lc {
+            backend: LcBackend::Micro(Box::new(LcMicrocircuit::new(CircuitConfig::default()))),
+        };
+
+        let cases = [
+            LcInput {
+                deny_count_short: 3,
+                timeout_count_short: 1,
+                arousal_floor: LevelClass::Low,
+                ..Default::default()
+            },
+            LcInput {
+                integrity: IntegrityState::Fail,
+                receipt_missing_count_short: 1,
+                arousal_floor: LevelClass::Med,
+                ..Default::default()
+            },
+        ];
+
+        for input in cases {
+            let rules_out = rules.tick(&input);
+            let micro_out = micro.tick(&input);
+
+            assert_eq!(rules_out, micro_out);
+        }
     }
 }

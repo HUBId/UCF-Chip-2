@@ -93,6 +93,8 @@ name = "dbm_0_sn"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
+ "microcircuit_core",
+ "microcircuit_sn_stub",
 ]
 
 [[package]]
@@ -128,6 +130,8 @@ name = "dbm_7_lc"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
+ "microcircuit_core",
+ "microcircuit_lc_stub",
 ]
 
 [[package]]
@@ -331,6 +335,29 @@ name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
+
+[[package]]
+name = "microcircuit_core"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+]
+
+[[package]]
+name = "microcircuit_lc_stub"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "microcircuit_core",
+]
+
+[[package]]
+name = "microcircuit_sn_stub"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "microcircuit_core",
+]
 
 [[package]]
 name = "proc-macro2"

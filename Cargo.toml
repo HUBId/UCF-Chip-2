@@ -26,6 +26,9 @@ members = [
     "crates/emotion_field",
     "crates/baseline_resolver",
     "crates/dbm_bus",
+    "crates/microcircuit_core",
+    "crates/microcircuit_sn_stub",
+    "crates/microcircuit_lc_stub",
 ]
 resolver = "2"
 

@@ -6,5 +6,10 @@ edition = "2021"
 [lib]
 path = "src/lib.rs"
 
+[features]
+microcircuit-sn = []
+
 [dependencies]
 dbm_core = { path = "../dbm_core" }
+microcircuit_core = { path = "../microcircuit_core" }
+microcircuit_sn_stub = { path = "../microcircuit_sn_stub" }

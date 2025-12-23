@@ -1,44 +1,20 @@
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+use dbm_core::IsvSnapshot;
 use dbm_core::{
-    DbmModule, DwmMode, IntegrityState, IsvSnapshot, LevelClass, ReasonSet, SalienceItem,
-    SalienceSource,
+    DbmModule, DwmMode, IntegrityState, LevelClass, ReasonSet, SalienceItem, SalienceSource,
 };
-
-#[derive(Debug, Clone, Default)]
-pub struct SnInput {
-    pub isv: IsvSnapshot,
-    pub cooldown_class: Option<LevelClass>,
-    pub current_dwm: Option<DwmMode>,
-    pub replay_hint: bool,
-    pub reward_block: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SnOutput {
-    pub dwm: DwmMode,
-    pub salience_items: Vec<SalienceItem>,
-    pub reason_codes: ReasonSet,
-}
-
-impl Default for SnOutput {
-    fn default() -> Self {
-        Self {
-            dwm: DwmMode::ExecPlan,
-            salience_items: Vec::new(),
-            reason_codes: ReasonSet::default(),
-        }
-    }
-}
+#[cfg(feature = "microcircuit-sn")]
+use microcircuit_core::CircuitConfig;
+use microcircuit_core::MicrocircuitBackend;
+pub use microcircuit_sn_stub::{SnInput, SnOutput};
+use std::fmt;
 
 #[derive(Debug, Default)]
-pub struct SubstantiaNigra {}
+pub struct SnRules;
 
-impl SubstantiaNigra {
-    pub fn new() -> Self {
-        Self {}
-    }
-
+impl SnRules {
     fn suggested_mode(input: &SnInput) -> DwmMode {
         if input.isv.integrity == IntegrityState::Fail {
             return DwmMode::Report;
@@ -183,13 +159,8 @@ impl SubstantiaNigra {
             LevelClass::Low => 0,
         }
     }
-}
 
-impl DbmModule for SubstantiaNigra {
-    type Input = SnInput;
-    type Output = SnOutput;
-
-    fn tick(&mut self, input: &Self::Input) -> Self::Output {
+    fn tick(&mut self, input: &SnInput) -> SnOutput {
         let suggested = Self::suggested_mode(input);
         let dwm = Self::apply_hysteresis(input.current_dwm, suggested);
 
@@ -208,6 +179,66 @@ impl DbmModule for SubstantiaNigra {
             salience_items,
             reason_codes,
         }
+    }
+}
+
+pub enum SnBackend {
+    Rules(SnRules),
+    Micro(Box<dyn MicrocircuitBackend<SnInput, SnOutput>>),
+}
+
+impl fmt::Debug for SnBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SnBackend::Rules(_) => f.write_str("SnBackend::Rules"),
+            SnBackend::Micro(_) => f.write_str("SnBackend::Micro"),
+        }
+    }
+}
+
+impl SnBackend {
+    fn tick(&mut self, input: &SnInput) -> SnOutput {
+        match self {
+            SnBackend::Rules(rules) => rules.tick(input),
+            SnBackend::Micro(backend) => backend.step(input, 0),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SubstantiaNigra {
+    backend: SnBackend,
+}
+
+impl SubstantiaNigra {
+    pub fn new() -> Self {
+        Self {
+            backend: SnBackend::Rules(SnRules::default()),
+        }
+    }
+
+    #[cfg(feature = "microcircuit-sn")]
+    pub fn new_micro(config: CircuitConfig) -> Self {
+        use microcircuit_sn_stub::SnMicrocircuit;
+
+        Self {
+            backend: SnBackend::Micro(Box::new(SnMicrocircuit::new(config))),
+        }
+    }
+}
+
+impl Default for SubstantiaNigra {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DbmModule for SubstantiaNigra {
+    type Input = SnInput;
+    type Output = SnOutput;
+
+    fn tick(&mut self, input: &Self::Input) -> Self::Output {
+        self.backend.tick(input)
     }
 }
 
@@ -314,10 +345,9 @@ mod tests {
         assert!(output.salience_items.windows(2).all(|pair| {
             let left = &pair[0];
             let right = &pair[1];
-            SubstantiaNigra::severity_level(left.intensity)
-                > SubstantiaNigra::severity_level(right.intensity)
-                || (SubstantiaNigra::severity_level(left.intensity)
-                    == SubstantiaNigra::severity_level(right.intensity)
+            SnRules::severity_level(left.intensity) > SnRules::severity_level(right.intensity)
+                || (SnRules::severity_level(left.intensity)
+                    == SnRules::severity_level(right.intensity)
                     && (left.source as u8) <= (right.source as u8))
         }));
 
@@ -372,5 +402,44 @@ mod tests {
         });
 
         assert_eq!(out_a, out_b);
+    }
+
+    #[cfg(feature = "microcircuit-sn")]
+    #[test]
+    fn micro_backend_matches_rules() {
+        use microcircuit_sn_stub::SnMicrocircuit;
+
+        let mut rules = SubstantiaNigra::new();
+        let mut micro = SubstantiaNigra {
+            backend: SnBackend::Micro(Box::new(SnMicrocircuit::new(CircuitConfig::default()))),
+        };
+
+        let cases = [
+            SnInput {
+                isv: IsvSnapshot {
+                    threat: LevelClass::High,
+                    progress: LevelClass::High,
+                    ..base_isv()
+                },
+                replay_hint: true,
+                reward_block: true,
+                ..Default::default()
+            },
+            SnInput {
+                isv: IsvSnapshot {
+                    integrity: IntegrityState::Fail,
+                    ..base_isv()
+                },
+                current_dwm: Some(DwmMode::Simulate),
+                ..Default::default()
+            },
+        ];
+
+        for input in cases {
+            let rules_out = rules.tick(&input);
+            let micro_out = micro.tick(&input);
+
+            assert_eq!(rules_out, micro_out);
+        }
     }
 }
