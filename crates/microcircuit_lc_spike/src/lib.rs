@@ -13,25 +13,13 @@ const SPIKE_RESET: i32 = 30;
 const REFRACTORY_STEPS: u32 = 2;
 const SPIKE_COUNT_MAX: u32 = 255;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct LcState {
     membrane: i32,
     refractory_steps: u32,
     spike_count_short: u32,
     tonic_floor: u8,
     step_count: u64,
-}
-
-impl Default for LcState {
-    fn default() -> Self {
-        Self {
-            membrane: 0,
-            refractory_steps: 0,
-            spike_count_short: 0,
-            tonic_floor: 0,
-            step_count: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
