@@ -29,6 +29,7 @@ members = [
     "crates/microcircuit_core",
     "crates/microcircuit_sn_stub",
     "crates/microcircuit_lc_stub",
+    "crates/microcircuit_lc_spike",
 ]
 resolver = "2"
 

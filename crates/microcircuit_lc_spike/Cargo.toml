@@ -1,17 +1,12 @@
 [package]
-name = "dbm_7_lc"
+name = "microcircuit_lc_spike"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
 path = "src/lib.rs"
 
-[features]
-microcircuit-lc = []
-microcircuit-lc-spike = ["microcircuit-lc"]
-
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_lc_stub = { path = "../microcircuit_lc_stub" }
-microcircuit_lc_spike = { path = "../microcircuit_lc_spike" }
