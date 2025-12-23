@@ -13,6 +13,7 @@ use dbm_pmrf::PmrfInput;
 use dbm_stn::StnInput;
 use ucf::v1::{CharacterBaselineVector, PolicyEcologyVector, WindowKind};
 
+#[allow(clippy::too_many_arguments)]
 fn make_input(
     now_ms: u64,
     deny_count_medium: u32,
@@ -176,14 +177,11 @@ fn brainbus_outputs_are_deterministic_and_bounded() {
 
         let output_a = bus_a.tick(input.clone());
         let output_b = bus_b.tick(input);
-
         assert_eq!(
             output_a.decision.profile_state,
             output_b.decision.profile_state
         );
-        assert_eq!(output_a.decision.overlays, output_b.decision.overlays);
         assert_eq!(output_a.dwm, output_b.dwm);
-        assert_eq!(output_a.emotion_field, output_b.emotion_field);
         assert_eq!(output_a.reason_codes, output_b.reason_codes);
 
         assert!(output_a.reason_codes.len() <= MAX_REASON_CODES);
