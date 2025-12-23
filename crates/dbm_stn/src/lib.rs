@@ -10,6 +10,8 @@ pub struct StnInput {
     pub receipt_invalid_present: bool,
     pub dlp_critical_present: bool,
     pub integrity: IntegrityState,
+    pub tool_side_effects_present: bool,
+    pub cerebellum_divergence: LevelClass,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -41,11 +43,17 @@ impl DbmModule for Stn {
             input.arousal == LevelClass::High && level_at_least(input.threat, LevelClass::Med);
 
         let integrity_block = input.integrity != IntegrityState::Ok;
+        let tool_side_effects_hold = (input.tool_side_effects_present
+            || input.cerebellum_divergence == LevelClass::High)
+            && (level_at_least(input.policy_pressure, LevelClass::Med)
+                || input.arousal == LevelClass::High);
+
         let hold_active = input.receipt_invalid_present
             || input.dlp_critical_present
             || integrity_block
             || input.policy_pressure == LevelClass::High
-            || arousal_threat_lock;
+            || arousal_threat_lock
+            || tool_side_effects_hold;
 
         if hold_active {
             hold_reason_codes.insert("RC.GV.HOLD.ON");
@@ -82,6 +90,8 @@ mod tests {
             receipt_invalid_present: false,
             dlp_critical_present: false,
             integrity: IntegrityState::Ok,
+            tool_side_effects_present: false,
+            cerebellum_divergence: LevelClass::Low,
         }
     }
 
@@ -124,5 +134,18 @@ mod tests {
         });
 
         assert!(output.hold_active);
+    }
+
+    #[test]
+    fn tool_side_effects_hold_with_policy_pressure() {
+        let mut stn = Stn::new();
+        let output = stn.tick(&StnInput {
+            tool_side_effects_present: true,
+            policy_pressure: LevelClass::Med,
+            ..base_input()
+        });
+
+        assert!(output.hold_active);
+        assert!(output.hint_simulate_first);
     }
 }
