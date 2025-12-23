@@ -4,25 +4,13 @@ use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet};
 use microcircuit_core::{digest_config, digest_meta, CircuitConfig, MicrocircuitBackend};
 use microcircuit_dopamin_stub::{DopaInput, DopaOutput};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct DopaAttractorState {
     utility: i32,
     motivation: i32,
     reward_block_latch: u8,
     no_progress_streak: u8,
     step_count: u64,
-}
-
-impl Default for DopaAttractorState {
-    fn default() -> Self {
-        Self {
-            utility: 0,
-            motivation: 0,
-            reward_block_latch: 0,
-            no_progress_streak: 0,
-            step_count: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
