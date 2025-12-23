@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet};
-use microcircuit_core::{digest_meta, CircuitConfig, MicrocircuitBackend};
+use microcircuit_core::{digest_config, digest_meta, CircuitConfig, MicrocircuitBackend};
 use microcircuit_lc_stub::{LcInput, LcOutput};
 
 const MEMBRANE_MIN: i32 = 0;
@@ -189,6 +189,10 @@ impl MicrocircuitBackend<LcInput, LcOutput> for LcMicrocircuit {
         bytes.extend(self.config.version.to_le_bytes());
 
         digest_meta("UCF:MC:LC", &bytes)
+    }
+
+    fn config_digest(&self) -> [u8; 32] {
+        digest_config("UCF:MC:LC:SPIKE:CONFIG", &self.config)
     }
 }
 

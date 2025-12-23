@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 
 use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet};
-use microcircuit_core::{digest_meta, CircuitConfig, CircuitStateMeta, MicrocircuitBackend};
+use microcircuit_core::{
+    digest_config, digest_meta, CircuitConfig, CircuitStateMeta, MicrocircuitBackend,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct LcInput {
@@ -108,6 +110,10 @@ impl MicrocircuitBackend<LcInput, LcOutput> for LcMicrocircuit {
         bytes.extend(self.meta.step_count.to_le_bytes());
 
         digest_meta("lc_stub", &bytes)
+    }
+
+    fn config_digest(&self) -> [u8; 32] {
+        digest_config("lc_stub_config", &self.config)
     }
 }
 

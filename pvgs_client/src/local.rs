@@ -1,8 +1,11 @@
 #![cfg(any(test, feature = "local-pvgs"))]
 
-use crate::PvgsReader;
-use chip4::pvgs::{CbvQuery, Digest32, PevQuery};
-use ucf::v1::{CharacterBaselineVector, PolicyEcologyVector};
+use crate::{PvgsError, PvgsReader, PvgsWriter};
+use chip4::pvgs::{CbvQuery, Digest32, MicrocircuitConfigCommit, PevQuery};
+use ucf::v1::{
+    CharacterBaselineVector, MicrocircuitConfigAppend, MicrocircuitConfigEvidence,
+    PolicyEcologyVector, PvgsReceipt,
+};
 
 #[derive(Clone)]
 pub struct LocalPvgsReader<Q: CbvQuery> {
@@ -47,5 +50,37 @@ impl<Q: CbvQuery + PevQuery> PvgsReader for LocalPvgsReader<Q> {
 
     fn get_latest_pev(&self) -> Option<PolicyEcologyVector> {
         self.query.get_latest_pev().and_then(|pev| pev.pev)
+    }
+}
+
+#[derive(Clone)]
+pub struct LocalPvgsWriter<C: MicrocircuitConfigCommit> {
+    commit: C,
+}
+
+impl<C: MicrocircuitConfigCommit> LocalPvgsWriter<C> {
+    pub fn new(commit: C) -> Self {
+        Self { commit }
+    }
+}
+
+impl<C: MicrocircuitConfigCommit> PvgsWriter for LocalPvgsWriter<C> {
+    fn commit_control_frame_evidence(
+        &mut self,
+        _session_id: &str,
+        _control_frame_digest: [u8; 32],
+    ) -> Result<(), PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_microcircuit_config(
+        &mut self,
+        evidence: MicrocircuitConfigEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Ok(self
+            .commit
+            .commit_microcircuit_config(MicrocircuitConfigAppend {
+                evidence: Some(evidence),
+            }))
     }
 }

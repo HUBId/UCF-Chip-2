@@ -3,7 +3,9 @@
 pub mod pvgs {
     use prost::Message;
     use std::sync::{Arc, Mutex};
-    use ucf::v1::{CharacterBaselineVector, PolicyEcologyVector};
+    use ucf::v1::{
+        CharacterBaselineVector, MicrocircuitConfigAppend, PolicyEcologyVector, PvgsReceipt,
+    };
 
     #[derive(Clone, PartialEq, Message)]
     pub struct Digest32 {
@@ -55,10 +57,15 @@ pub mod pvgs {
         fn get_latest_pev(&self) -> Option<Pev>;
     }
 
+    pub trait MicrocircuitConfigCommit: Clone + Send + Sync {
+        fn commit_microcircuit_config(&self, append: MicrocircuitConfigAppend) -> PvgsReceipt;
+    }
+
     #[derive(Clone, Default)]
     pub struct InMemoryPvgs {
         latest_cbv: Arc<Mutex<Option<Cbv>>>,
         latest_pev: Arc<Mutex<Option<Pev>>>,
+        latest_microcircuit_config: Arc<Mutex<Option<MicrocircuitConfigAppend>>>,
     }
 
     impl InMemoryPvgs {
@@ -87,6 +94,10 @@ pub mod pvgs {
                 *guard = Some(update);
             }
         }
+
+        pub fn latest_microcircuit_config(&self) -> Option<MicrocircuitConfigAppend> {
+            self.latest_microcircuit_config.lock().unwrap().clone()
+        }
     }
 
     impl CbvQuery for InMemoryPvgs {
@@ -98,6 +109,13 @@ pub mod pvgs {
     impl PevQuery for InMemoryPvgs {
         fn get_latest_pev(&self) -> Option<Pev> {
             self.latest_pev.lock().unwrap().clone()
+        }
+    }
+
+    impl MicrocircuitConfigCommit for InMemoryPvgs {
+        fn commit_microcircuit_config(&self, append: MicrocircuitConfigAppend) -> PvgsReceipt {
+            *self.latest_microcircuit_config.lock().unwrap() = Some(append);
+            PvgsReceipt::default()
         }
     }
 }

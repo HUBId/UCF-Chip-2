@@ -118,6 +118,13 @@ impl Lc {
             LcBackend::Rules(_) => None,
         }
     }
+
+    pub fn config_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            LcBackend::Micro(backend) => Some(backend.config_digest()),
+            LcBackend::Rules(_) => None,
+        }
+    }
 }
 
 impl Default for Lc {

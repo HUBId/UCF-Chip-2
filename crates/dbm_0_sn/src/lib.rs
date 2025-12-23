@@ -244,6 +244,13 @@ impl SubstantiaNigra {
             SnBackend::Rules(_) => None,
         }
     }
+
+    pub fn config_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            SnBackend::Micro(backend) => Some(backend.config_digest()),
+            SnBackend::Rules(_) => None,
+        }
+    }
 }
 
 impl Default for SubstantiaNigra {
