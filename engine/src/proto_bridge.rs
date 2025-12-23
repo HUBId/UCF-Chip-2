@@ -24,6 +24,7 @@ use crate::{
 };
 
 const CONTROL_FRAME_DOMAIN: &str = "UCF:HASH:CONTROL_FRAME";
+const CONTROL_FRAME_REASON_MAX_LEN: usize = ReasonSet::DEFAULT_MAX_LEN;
 
 #[derive(Debug, Clone)]
 pub struct BaselineContext {
@@ -194,8 +195,7 @@ pub fn control_frame_from_brain_output(
         .iter()
         .map(|code| *code as i32)
         .collect();
-    let profile_reason_cap = ReasonSet::DEFAULT_MAX_LEN.max(profile_reason_codes.len());
-    sanitize_reason_codes(&mut profile_reason_codes, profile_reason_cap);
+    sanitize_reason_codes(&mut profile_reason_codes, CONTROL_FRAME_REASON_MAX_LEN);
 
     let mut control_frame = ControlFrame {
         active_profile: Some(profile),
@@ -210,14 +210,7 @@ pub fn control_frame_from_brain_output(
         cooldown_class: Some(decision.cooldown_class as i32),
     };
 
-    let mut buf = Vec::new();
-    control_frame.encode(&mut buf).unwrap();
-
-    let mut hasher = Hasher::new_derive_key(CONTROL_FRAME_DOMAIN);
-    hasher.update(&buf);
-    let digest = hasher.finalize();
-    let digest_bytes: [u8; 32] = *digest.as_bytes();
-
+    let digest_bytes = control_frame_digest(&control_frame);
     control_frame.control_frame_digest = Some(digest_bytes.to_vec());
 
     (control_frame, digest_bytes)
@@ -299,6 +292,22 @@ fn sanitize_reason_codes(codes: &mut Vec<i32>, max_len: usize) {
     codes.sort();
     codes.dedup();
     codes.truncate(max_len);
+}
+
+fn control_frame_digest(control_frame: &ControlFrame) -> [u8; 32] {
+    let mut normalized = control_frame.clone();
+    normalized.control_frame_digest = None;
+    normalized.profile_reason_codes = normalized_reason_code_list(
+        &normalized.profile_reason_codes,
+        CONTROL_FRAME_REASON_MAX_LEN,
+    );
+
+    let mut buf = Vec::new();
+    normalized.encode(&mut buf).unwrap();
+
+    let mut hasher = Hasher::new_derive_key(CONTROL_FRAME_DOMAIN);
+    hasher.update(&buf);
+    *hasher.finalize().as_bytes()
 }
 
 fn normalized_reason_strings(codes: &[i32]) -> Vec<String> {
@@ -457,5 +466,78 @@ fn build_amygdala_input(
         sealed: Some(classified.integrity_state == IntegrityStateClass::Fail),
         tool_anomaly_present: false,
         tool_anomalies: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn control_frame_fixture(profile_reason_codes: Vec<i32>) -> ControlFrame {
+        ControlFrame {
+            active_profile: Some(ActiveProfile {
+                profile: "M0".to_string(),
+            }),
+            overlays: Some(Overlays {
+                simulate_first: false,
+                export_lock: false,
+                novelty_lock: false,
+                chain_tightening: false,
+            }),
+            toolclass_mask: Some(ucf::v1::ToolClassMask {
+                read: true,
+                write: true,
+                execute: true,
+                transform: true,
+                export: true,
+            }),
+            profile_reason_codes,
+            control_frame_digest: None,
+            character_epoch_digest: None,
+            policy_ecology_digest: None,
+            approval_mode: Some("strict".to_string()),
+            deescalation_lock: Some(false),
+            cooldown_class: Some(ucf::v1::LevelClass::Low as i32),
+        }
+    }
+
+    #[test]
+    fn control_frame_hash_normalizes_reason_codes() {
+        let noisy_codes = vec![
+            ReasonCode::RcGvOrientTargetIntegrity as i32,
+            ReasonCode::RcGvDwmStabilize as i32,
+            ReasonCode::RcGvDwmReport as i32,
+            ReasonCode::RcGvDwmReport as i32,
+            ReasonCode::RcGvDwmExecPlan as i32,
+            ReasonCode::RcGvDwmSimulate as i32,
+            ReasonCode::RcGvSequenceSplitRequired as i32,
+            ReasonCode::RcGvOrientTargetRecovery as i32,
+            ReasonCode::RcGvOrientTargetApproval as i32,
+            ReasonCode::RcGvOrientTargetDlp as i32,
+        ];
+
+        let mut shuffled_codes = noisy_codes.clone();
+        shuffled_codes.reverse();
+
+        let frame_a = control_frame_fixture(noisy_codes);
+        let frame_b = control_frame_fixture(shuffled_codes);
+
+        let digest_a = control_frame_digest(&frame_a);
+        let digest_b = control_frame_digest(&frame_b);
+
+        assert_eq!(digest_a, digest_b);
+
+        let normalized_codes = normalized_reason_code_list(
+            &frame_a.profile_reason_codes,
+            CONTROL_FRAME_REASON_MAX_LEN,
+        );
+        assert!(normalized_codes.len() <= CONTROL_FRAME_REASON_MAX_LEN);
+        assert_eq!(
+            normalized_codes,
+            normalized_reason_code_list(
+                &frame_b.profile_reason_codes,
+                CONTROL_FRAME_REASON_MAX_LEN
+            )
+        );
     }
 }
