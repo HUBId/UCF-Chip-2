@@ -111,9 +111,7 @@ impl SnAttractorMicrocircuit {
         best_idx as u8
     }
 
-    fn encode_contributions(
-        input: &SnInput,
-    ) -> ([i32; 4], Vec<(SalienceSource, i32)>) {
+    fn encode_contributions(input: &SnInput) -> ([i32; 4], Vec<(SalienceSource, i32)>) {
         let mut contrib = [0i32; 4];
         let mut salience = Vec::new();
 

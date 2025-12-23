@@ -416,7 +416,10 @@ mod tests {
         assert_eq!(out_a, out_b);
     }
 
-    #[cfg(all(feature = "microcircuit-sn", not(feature = "microcircuit-sn-attractor")))]
+    #[cfg(all(
+        feature = "microcircuit-sn",
+        not(feature = "microcircuit-sn-attractor")
+    ))]
     #[test]
     fn micro_backend_matches_rules() {
         use microcircuit_sn_stub::SnMicrocircuit;
