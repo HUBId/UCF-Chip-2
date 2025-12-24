@@ -231,6 +231,9 @@ name = "dbm_sc"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
+ "microcircuit_core",
+ "microcircuit_sc_attractor",
+ "microcircuit_sc_stub",
 ]
 
 [[package]]
@@ -442,6 +445,22 @@ dependencies = [
 
 [[package]]
 name = "microcircuit_pmrf_stub"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+]
+
+[[package]]
+name = "microcircuit_sc_attractor"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_sc_stub",
+]
+
+[[package]]
+name = "microcircuit_sc_stub"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
