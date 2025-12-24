@@ -1,16 +1,13 @@
 [package]
-name = "dbm_12_insula"
+name = "microcircuit_insula_fusion"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
 path = "src/lib.rs"
 
-[features]
-microcircuit-insula-fusion = []
-
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_insula_stub = { path = "../microcircuit_insula_stub" }
-microcircuit_insula_fusion = { path = "../microcircuit_insula_fusion" }
+microcircuit_pag_stub = { path = "../microcircuit_pag_stub" }

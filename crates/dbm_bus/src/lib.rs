@@ -359,6 +359,12 @@ impl BrainBus {
 
         let mut insula_input = input.insula;
         insula_input.hbv_present = true;
+        insula_input.arousal = lc_output.arousal;
+        insula_input.stability = ser_output.stability;
+        insula_input.threat = amy_output.threat;
+        insula_input.threat_vectors = amy_output.vectors.clone();
+        insula_input.pag_pattern = Some(pag_output.pattern);
+        insula_input.stn_hold_active = stn_output.hold_active;
         insula_input
             .dominant_reason_codes
             .extend(amy_output.reason_codes.codes.clone());

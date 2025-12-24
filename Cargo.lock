@@ -104,6 +104,9 @@ name = "dbm_12_insula"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
+ "microcircuit_core",
+ "microcircuit_insula_fusion",
+ "microcircuit_insula_stub",
 ]
 
 [[package]]
@@ -418,6 +421,24 @@ version = "0.1.0"
 dependencies = [
  "dbm_core",
  "microcircuit_core",
+]
+
+[[package]]
+name = "microcircuit_insula_fusion"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_insula_stub",
+ "microcircuit_pag_stub",
+]
+
+[[package]]
+name = "microcircuit_insula_stub"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "microcircuit_pag_stub",
 ]
 
 [[package]]

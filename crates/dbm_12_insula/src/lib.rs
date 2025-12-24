@@ -1,168 +1,82 @@
 #![forbid(unsafe_code)]
 
-use dbm_core::{DbmModule, IntegrityState, IsvSnapshot, LevelClass, ReasonSet};
+use dbm_core::DbmModule;
+#[cfg(feature = "microcircuit-insula-fusion")]
+use microcircuit_core::CircuitConfig;
+use microcircuit_core::MicrocircuitBackend;
+pub use microcircuit_insula_stub::{InsulaInput, InsulaRules};
+use std::fmt;
 
-#[derive(Debug, Clone)]
-pub struct InsulaInput {
-    pub policy_pressure: LevelClass,
-    pub receipt_failures: LevelClass,
-    pub receipt_invalid_present: bool,
-    pub exec_reliability: LevelClass,
-    pub integrity: IntegrityState,
-    pub timeout_burst: bool,
-    pub cbv_present: bool,
-    pub pev_present: bool,
-    pub hbv_present: bool,
-    pub progress: LevelClass,
-    pub dominant_reason_codes: Vec<String>,
+pub enum InsulaBackend {
+    Rules(InsulaRules),
+    Micro(Box<dyn MicrocircuitBackend<InsulaInput, dbm_core::IsvSnapshot>>),
 }
 
-impl Default for InsulaInput {
-    fn default() -> Self {
-        Self {
-            policy_pressure: LevelClass::Low,
-            receipt_failures: LevelClass::Low,
-            receipt_invalid_present: false,
-            exec_reliability: LevelClass::Low,
-            integrity: IntegrityState::Ok,
-            timeout_burst: false,
-            cbv_present: false,
-            pev_present: false,
-            hbv_present: false,
-            progress: LevelClass::Low,
-            dominant_reason_codes: Vec::new(),
+impl fmt::Debug for InsulaBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InsulaBackend::Rules(_) => f.write_str("InsulaBackend::Rules"),
+            InsulaBackend::Micro(_) => f.write_str("InsulaBackend::Micro"),
         }
     }
 }
 
-#[derive(Debug, Default)]
-pub struct Insula {}
+impl InsulaBackend {
+    fn tick(&mut self, input: &InsulaInput) -> dbm_core::IsvSnapshot {
+        match self {
+            InsulaBackend::Rules(rules) => rules.tick(input),
+            InsulaBackend::Micro(backend) => backend.step(input, 0),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Insula {
+    backend: InsulaBackend,
+}
 
 impl Insula {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            backend: InsulaBackend::Rules(InsulaRules::new()),
+        }
+    }
+
+    #[cfg(feature = "microcircuit-insula-fusion")]
+    pub fn new_micro(config: CircuitConfig) -> Self {
+        use microcircuit_insula_fusion::InsulaFusionMicrocircuit;
+
+        Self {
+            backend: InsulaBackend::Micro(Box::new(InsulaFusionMicrocircuit::new(config))),
+        }
+    }
+
+    pub fn snapshot_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            InsulaBackend::Micro(backend) => Some(backend.snapshot_digest()),
+            InsulaBackend::Rules(_) => None,
+        }
+    }
+
+    pub fn config_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            InsulaBackend::Micro(backend) => Some(backend.config_digest()),
+            InsulaBackend::Rules(_) => None,
+        }
+    }
+}
+
+impl Default for Insula {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl DbmModule for Insula {
     type Input = InsulaInput;
-    type Output = IsvSnapshot;
+    type Output = dbm_core::IsvSnapshot;
 
     fn tick(&mut self, input: &Self::Input) -> Self::Output {
-        let mut snapshot = IsvSnapshot {
-            integrity: input.integrity,
-            policy_pressure: input.policy_pressure,
-            progress: input.progress,
-            ..IsvSnapshot::default()
-        };
-
-        if matches!(input.integrity, IntegrityState::Fail) {
-            snapshot.threat = LevelClass::High;
-            snapshot.arousal = LevelClass::High;
-            snapshot.stability = LevelClass::High;
-        }
-
-        if input.receipt_invalid_present {
-            snapshot.threat = LevelClass::High;
-        }
-
-        if input.policy_pressure == LevelClass::High {
-            snapshot.policy_pressure = LevelClass::High;
-            snapshot.arousal = LevelClass::Med.max(snapshot.arousal);
-        }
-
-        if input.timeout_burst || input.exec_reliability == LevelClass::High {
-            snapshot.arousal = LevelClass::High;
-        }
-
-        if input.integrity != IntegrityState::Ok {
-            snapshot.stability = LevelClass::High;
-        }
-
-        let mut reasons = ReasonSet::default();
-        reasons.extend(input.dominant_reason_codes.clone());
-        snapshot.dominant_reason_codes = reasons;
-
-        snapshot
-    }
-}
-
-trait LevelClassExt {
-    fn max(self, other: Self) -> Self;
-}
-
-impl LevelClassExt for LevelClass {
-    fn max(self, other: Self) -> Self {
-        use LevelClass::*;
-        match (self, other) {
-            (High, _) | (_, High) => High,
-            (Med, _) | (_, Med) => Med,
-            _ => Low,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn reason_codes() -> Vec<String> {
-        vec!["a".to_string(), "b".to_string(), "c".to_string()]
-    }
-
-    #[test]
-    fn integrity_fail_drives_high_values() {
-        let mut module = Insula::new();
-        let input = InsulaInput {
-            integrity: IntegrityState::Fail,
-            receipt_invalid_present: true,
-            dominant_reason_codes: reason_codes(),
-            ..Default::default()
-        };
-
-        let snapshot = module.tick(&input);
-        assert_eq!(snapshot.threat, LevelClass::High);
-        assert_eq!(snapshot.arousal, LevelClass::High);
-        assert_eq!(snapshot.stability, LevelClass::High);
-        assert_eq!(snapshot.dominant_reason_codes.codes.len(), 3);
-    }
-
-    #[test]
-    fn policy_pressure_and_timeouts_raise_arousal() {
-        let mut module = Insula::new();
-        let input = InsulaInput {
-            policy_pressure: LevelClass::High,
-            exec_reliability: LevelClass::High,
-            timeout_burst: true,
-            ..Default::default()
-        };
-
-        let snapshot = module.tick(&input);
-        assert_eq!(snapshot.policy_pressure, LevelClass::High);
-        assert_eq!(snapshot.arousal, LevelClass::High);
-    }
-
-    #[test]
-    fn integrity_degraded_sets_stability_high() {
-        let mut module = Insula::new();
-        let input = InsulaInput {
-            integrity: IntegrityState::Degraded,
-            ..Default::default()
-        };
-
-        let snapshot = module.tick(&input);
-        assert_eq!(snapshot.stability, LevelClass::High);
-    }
-
-    #[test]
-    fn progress_is_passthrough_from_dopamin() {
-        let mut module = Insula::new();
-        let input = InsulaInput {
-            progress: LevelClass::High,
-            ..Default::default()
-        };
-
-        let snapshot = module.tick(&input);
-        assert_eq!(snapshot.progress, LevelClass::High);
+        self.backend.tick(input)
     }
 }
