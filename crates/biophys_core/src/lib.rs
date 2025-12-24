@@ -9,17 +9,12 @@ pub struct SynapseId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CompartmentId(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ModLevel {
     Low = 0,
+    #[default]
     Med = 1,
     High = 2,
-}
-
-impl Default for ModLevel {
-    fn default() -> Self {
-        ModLevel::Med
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -29,19 +24,14 @@ pub struct ModulatorField {
     pub ht: ModLevel,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ModChannel {
+    #[default]
     None,
     Na,
     Da,
     Ht,
     NaDa,
-}
-
-impl Default for ModChannel {
-    fn default() -> Self {
-        ModChannel::None
-    }
 }
 
 pub fn level_mul(level: ModLevel) -> i32 {
