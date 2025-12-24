@@ -92,7 +92,12 @@ pub fn brain_input_from_signal_frame(
             unlock_present: rsv.unlock_ready,
             stability_floor: BrainLevel::Low,
         },
-        amygdala: build_amygdala_input(&normalized_frame, classified, counters),
+        amygdala: build_amygdala_input(
+            &normalized_frame,
+            classified,
+            counters,
+            to_brain_level(rsv.divergence),
+        ),
         pag: PagInput {
             integrity: to_brain_integrity(classified.integrity_state),
             threat: BrainLevel::Low,
@@ -453,6 +458,7 @@ fn build_amygdala_input(
     frame: &ucf::v1::SignalFrame,
     classified: &ClassifiedSignals,
     counters: &WindowCounters,
+    divergence: BrainLevel,
 ) -> AmyInput {
     let (dlp_secret_present, dlp_obfuscation_present, dlp_stegano_present) =
         crate::dlp_flags(frame);
@@ -463,11 +469,14 @@ fn build_amygdala_input(
         dlp_secret_present,
         dlp_obfuscation_present,
         dlp_stegano_present,
+        dlp_critical_count_med: counters.medium_dlp_critical_count,
         receipt_invalid_medium: counters.medium_receipt_invalid_count,
         policy_pressure: to_brain_level(classified.policy_pressure_class),
+        deny_storm_present: classified.policy_deny_count >= 5,
         sealed: Some(classified.integrity_state == IntegrityStateClass::Fail),
         tool_anomaly_present: false,
         tool_anomalies: Vec::new(),
+        divergence,
     }
 }
 

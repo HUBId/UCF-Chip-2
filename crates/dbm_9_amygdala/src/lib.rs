@@ -1,44 +1,74 @@
 #![forbid(unsafe_code)]
 
-use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet, ThreatVector, ToolKey};
+use dbm_core::DbmModule;
+pub use microcircuit_amygdala_stub::{AmyInput, AmyOutput, AmyRules};
+#[cfg(feature = "microcircuit-amygdala-pop")]
+use microcircuit_core::CircuitConfig;
+use microcircuit_core::MicrocircuitBackend;
+use std::fmt;
 
-#[derive(Debug, Clone, Default)]
-pub struct AmyInput {
-    pub integrity: IntegrityState,
-    pub replay_mismatch_present: bool,
-    pub dlp_secret_present: bool,
-    pub dlp_obfuscation_present: bool,
-    pub dlp_stegano_present: bool,
-    pub receipt_invalid_medium: u32,
-    pub policy_pressure: LevelClass,
-    pub sealed: Option<bool>,
-    pub tool_anomaly_present: bool,
-    pub tool_anomalies: Vec<(ToolKey, LevelClass)>,
+pub enum AmyBackend {
+    Rules(AmyRules),
+    Micro(Box<dyn MicrocircuitBackend<AmyInput, AmyOutput>>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AmyOutput {
-    pub threat: LevelClass,
-    pub vectors: Vec<ThreatVector>,
-    pub reason_codes: ReasonSet,
-}
-
-impl Default for AmyOutput {
-    fn default() -> Self {
-        Self {
-            threat: LevelClass::Low,
-            vectors: Vec::new(),
-            reason_codes: ReasonSet::default(),
+impl fmt::Debug for AmyBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AmyBackend::Rules(_) => f.write_str("AmyBackend::Rules"),
+            AmyBackend::Micro(_) => f.write_str("AmyBackend::Micro"),
         }
     }
 }
 
-#[derive(Debug, Default)]
-pub struct Amygdala {}
+impl AmyBackend {
+    fn tick(&mut self, input: &AmyInput) -> AmyOutput {
+        match self {
+            AmyBackend::Rules(rules) => rules.tick(input),
+            AmyBackend::Micro(backend) => backend.step(input, 0),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Amygdala {
+    backend: AmyBackend,
+}
 
 impl Amygdala {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            backend: AmyBackend::Rules(AmyRules::new()),
+        }
+    }
+
+    #[cfg(feature = "microcircuit-amygdala-pop")]
+    pub fn new_micro(config: CircuitConfig) -> Self {
+        use microcircuit_amygdala_pop::AmygdalaPopMicrocircuit;
+
+        Self {
+            backend: AmyBackend::Micro(Box::new(AmygdalaPopMicrocircuit::new(config))),
+        }
+    }
+
+    pub fn snapshot_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            AmyBackend::Micro(backend) => Some(backend.snapshot_digest()),
+            AmyBackend::Rules(_) => None,
+        }
+    }
+
+    pub fn config_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            AmyBackend::Micro(backend) => Some(backend.config_digest()),
+            AmyBackend::Rules(_) => None,
+        }
+    }
+}
+
+impl Default for Amygdala {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -47,85 +77,14 @@ impl DbmModule for Amygdala {
     type Output = AmyOutput;
 
     fn tick(&mut self, input: &Self::Input) -> Self::Output {
-        let mut output = AmyOutput::default();
-        let mut reason_codes = ReasonSet::default();
-
-        let sealed = input
-            .sealed
-            .unwrap_or(matches!(input.integrity, IntegrityState::Fail));
-
-        let integrity_compromise = sealed
-            || matches!(input.integrity, IntegrityState::Fail)
-            || input.replay_mismatch_present;
-        let exfil_present =
-            input.dlp_secret_present || input.dlp_obfuscation_present || input.dlp_stegano_present;
-        let probing_present = input.policy_pressure == LevelClass::High;
-        let tool_side_effects = input.tool_anomaly_present
-            || input
-                .tool_anomalies
-                .iter()
-                .any(|(_, level)| matches!(level, LevelClass::High));
-
-        let mut vectors: Vec<ThreatVector> = Vec::new();
-        for vector in [
-            ThreatVector::Exfil,
-            ThreatVector::Probing,
-            ThreatVector::IntegrityCompromise,
-            ThreatVector::RuntimeEscape,
-            ThreatVector::ToolSideEffects,
-        ] {
-            let should_add = match vector {
-                ThreatVector::Exfil => exfil_present,
-                ThreatVector::Probing => probing_present,
-                ThreatVector::IntegrityCompromise => integrity_compromise,
-                ThreatVector::RuntimeEscape => false,
-                ThreatVector::ToolSideEffects => tool_side_effects,
-            };
-
-            if should_add {
-                vectors.push(vector);
-            }
-        }
-
-        if integrity_compromise {
-            reason_codes.insert("RcThIntegrityCompromise");
-        }
-
-        if exfil_present {
-            reason_codes.insert("ThExfilHighConfidence");
-        }
-
-        if probing_present {
-            reason_codes.insert("ThPolicyProbing");
-        }
-        if tool_side_effects {
-            reason_codes.insert("RC.TH.TOOL_SIDE_EFFECTS");
-        }
-
-        let threat = if integrity_compromise || exfil_present || input.receipt_invalid_medium >= 1 {
-            LevelClass::High
-        } else if probing_present {
-            LevelClass::Med
-        } else if tool_side_effects {
-            if input.policy_pressure == LevelClass::High {
-                LevelClass::High
-            } else {
-                LevelClass::Med
-            }
-        } else {
-            LevelClass::Low
-        };
-
-        output.threat = threat;
-        output.vectors = vectors;
-        output.reason_codes = reason_codes;
-        output
+        self.backend.tick(input)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dbm_core::{IntegrityState, LevelClass, ThreatVector};
 
     fn base_input() -> AmyInput {
         AmyInput {
@@ -134,11 +93,14 @@ mod tests {
             dlp_secret_present: false,
             dlp_obfuscation_present: false,
             dlp_stegano_present: false,
+            dlp_critical_count_med: 0,
             receipt_invalid_medium: 0,
             policy_pressure: LevelClass::Low,
+            deny_storm_present: false,
             sealed: None,
             tool_anomaly_present: false,
             tool_anomalies: Vec::new(),
+            divergence: LevelClass::Low,
         }
     }
 
@@ -213,5 +175,81 @@ mod tests {
             .reason_codes
             .codes
             .contains(&"RC.TH.TOOL_SIDE_EFFECTS".to_string()));
+    }
+
+    #[cfg(feature = "microcircuit-amygdala-pop")]
+    mod invariants {
+        use super::*;
+        use microcircuit_core::CircuitConfig;
+
+        fn threat_rank(level: LevelClass) -> u8 {
+            match level {
+                LevelClass::Low => 0,
+                LevelClass::Med => 1,
+                LevelClass::High => 2,
+            }
+        }
+
+        fn assert_not_less(micro: &AmyOutput, rules: &AmyOutput) {
+            assert!(threat_rank(micro.threat) >= threat_rank(rules.threat));
+        }
+
+        #[test]
+        fn dlp_critical_not_less_than_rules() {
+            let mut rules = Amygdala::new();
+            let mut micro = Amygdala::new_micro(CircuitConfig::default());
+            let input = AmyInput {
+                dlp_secret_present: true,
+                dlp_critical_count_med: 1,
+                ..base_input()
+            };
+
+            let rules_output = rules.tick(&input);
+            let micro_output = micro.tick(&input);
+
+            assert_not_less(&micro_output, &rules_output);
+            assert!(micro_output.vectors.contains(&ThreatVector::Exfil));
+            assert!(rules_output.vectors.contains(&ThreatVector::Exfil));
+        }
+
+        #[test]
+        fn integrity_fail_not_less_than_rules() {
+            let mut rules = Amygdala::new();
+            let mut micro = Amygdala::new_micro(CircuitConfig::default());
+            let input = AmyInput {
+                integrity: IntegrityState::Fail,
+                ..base_input()
+            };
+
+            let rules_output = rules.tick(&input);
+            let micro_output = micro.tick(&input);
+
+            assert_not_less(&micro_output, &rules_output);
+            assert!(micro_output
+                .vectors
+                .contains(&ThreatVector::IntegrityCompromise));
+            assert!(rules_output
+                .vectors
+                .contains(&ThreatVector::IntegrityCompromise));
+        }
+
+        #[test]
+        fn receipt_invalid_not_less_than_rules() {
+            let mut rules = Amygdala::new();
+            let mut micro = Amygdala::new_micro(CircuitConfig::default());
+            let input = AmyInput {
+                receipt_invalid_medium: 1,
+                ..base_input()
+            };
+
+            let mut rules_output = AmyOutput::default();
+            let mut micro_output = AmyOutput::default();
+            for _ in 0..25 {
+                rules_output = rules.tick(&input);
+                micro_output = micro.tick(&input);
+            }
+
+            assert_not_less(&micro_output, &rules_output);
+        }
     }
 }

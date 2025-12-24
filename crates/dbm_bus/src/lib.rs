@@ -290,6 +290,9 @@ impl BrainBus {
                 .as_ref()
                 .map(|output| output.tool_anomalies.clone())
                 .unwrap_or_default(),
+            divergence: cerebellum_output
+                .as_ref()
+                .map_or(input.amygdala.divergence, |output| output.divergence),
             ..input.amygdala
         };
         let amy_output = self.amygdala.tick(&amy_input);
