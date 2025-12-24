@@ -1,16 +1,12 @@
 [package]
-name = "dbm_stn"
+name = "microcircuit_stn_hold"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
 path = "src/lib.rs"
 
-[features]
-microcircuit-stn-hold = ["dep:microcircuit_stn_hold"]
-
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_stn_stub = { path = "../microcircuit_stn_stub" }
-microcircuit_stn_hold = { path = "../microcircuit_stn_hold", optional = true }

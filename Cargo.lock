@@ -235,6 +235,9 @@ name = "dbm_stn"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
+ "microcircuit_core",
+ "microcircuit_stn_hold",
+ "microcircuit_stn_stub",
 ]
 
 [[package]]
@@ -457,6 +460,22 @@ version = "0.1.0"
 dependencies = [
  "dbm_core",
  "microcircuit_core",
+]
+
+[[package]]
+name = "microcircuit_stn_hold"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_stn_stub",
+]
+
+[[package]]
+name = "microcircuit_stn_stub"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
 ]
 
 [[package]]

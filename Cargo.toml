@@ -39,6 +39,8 @@ members = [
     "crates/microcircuit_amygdala_pop",
     "crates/microcircuit_pag_stub",
     "crates/microcircuit_pag_attractor",
+    "crates/microcircuit_stn_stub",
+    "crates/microcircuit_stn_hold",
 ]
 resolver = "2"
 

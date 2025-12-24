@@ -1,34 +1,74 @@
 #![forbid(unsafe_code)]
 
-use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet};
+use dbm_core::DbmModule;
+#[cfg(feature = "microcircuit-stn-hold")]
+use microcircuit_core::CircuitConfig;
+use microcircuit_core::MicrocircuitBackend;
+pub use microcircuit_stn_stub::{StnInput, StnOutput, StnRules};
+use std::fmt;
 
-#[derive(Debug, Clone, Default)]
-pub struct StnInput {
-    pub policy_pressure: LevelClass,
-    pub arousal: LevelClass,
-    pub threat: LevelClass,
-    pub receipt_invalid_present: bool,
-    pub dlp_critical_present: bool,
-    pub integrity: IntegrityState,
-    pub tool_side_effects_present: bool,
-    pub cerebellum_divergence: LevelClass,
+pub enum StnBackend {
+    Rules(StnRules),
+    Micro(Box<dyn MicrocircuitBackend<StnInput, StnOutput>>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct StnOutput {
-    pub hold_active: bool,
-    pub hold_reason_codes: ReasonSet,
-    pub hint_simulate_first: bool,
-    pub hint_novelty_lock: bool,
-    pub hint_export_lock: bool,
+impl fmt::Debug for StnBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StnBackend::Rules(_) => f.write_str("StnBackend::Rules"),
+            StnBackend::Micro(_) => f.write_str("StnBackend::Micro"),
+        }
+    }
 }
 
-#[derive(Debug, Default)]
-pub struct Stn {}
+impl StnBackend {
+    fn tick(&mut self, input: &StnInput) -> StnOutput {
+        match self {
+            StnBackend::Rules(rules) => rules.tick(input),
+            StnBackend::Micro(backend) => backend.step(input, 0),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Stn {
+    backend: StnBackend,
+}
 
 impl Stn {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            backend: StnBackend::Rules(StnRules::new()),
+        }
+    }
+
+    #[cfg(feature = "microcircuit-stn-hold")]
+    pub fn new_micro(config: CircuitConfig) -> Self {
+        use microcircuit_stn_hold::StnHoldMicrocircuit;
+
+        Self {
+            backend: StnBackend::Micro(Box::new(StnHoldMicrocircuit::new(config))),
+        }
+    }
+
+    pub fn snapshot_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            StnBackend::Micro(backend) => Some(backend.snapshot_digest()),
+            StnBackend::Rules(_) => None,
+        }
+    }
+
+    pub fn config_digest(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            StnBackend::Micro(backend) => Some(backend.config_digest()),
+            StnBackend::Rules(_) => None,
+        }
+    }
+}
+
+impl Default for Stn {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -37,50 +77,14 @@ impl DbmModule for Stn {
     type Output = StnOutput;
 
     fn tick(&mut self, input: &Self::Input) -> Self::Output {
-        let mut hold_reason_codes = ReasonSet::default();
-
-        let arousal_threat_lock =
-            input.arousal == LevelClass::High && level_at_least(input.threat, LevelClass::Med);
-
-        let integrity_block = input.integrity != IntegrityState::Ok;
-        let tool_side_effects_hold = (input.tool_side_effects_present
-            || input.cerebellum_divergence == LevelClass::High)
-            && (level_at_least(input.policy_pressure, LevelClass::Med)
-                || input.arousal == LevelClass::High);
-
-        let hold_active = input.receipt_invalid_present
-            || input.dlp_critical_present
-            || integrity_block
-            || input.policy_pressure == LevelClass::High
-            || arousal_threat_lock
-            || tool_side_effects_hold;
-
-        if hold_active {
-            hold_reason_codes.insert("RC.GV.HOLD.ON");
-        }
-
-        let hint_simulate_first = hold_active;
-        let hint_novelty_lock =
-            input.policy_pressure == LevelClass::High || input.arousal == LevelClass::High;
-        let hint_export_lock = input.dlp_critical_present;
-
-        StnOutput {
-            hold_active,
-            hold_reason_codes,
-            hint_simulate_first,
-            hint_novelty_lock,
-            hint_export_lock,
-        }
+        self.backend.tick(input)
     }
-}
-
-fn level_at_least(value: LevelClass, threshold: LevelClass) -> bool {
-    (value as i32) >= (threshold as i32)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dbm_core::{IntegrityState, LevelClass};
 
     fn base_input() -> StnInput {
         StnInput {
@@ -147,5 +151,51 @@ mod tests {
 
         assert!(output.hold_active);
         assert!(output.hint_simulate_first);
+    }
+
+    #[cfg(feature = "microcircuit-stn-hold")]
+    mod microcircuit_invariants {
+        use super::*;
+        use microcircuit_core::CircuitConfig;
+
+        fn assert_micro_superset(input: StnInput) {
+            let mut rules = StnRules::new();
+            let mut micro = Stn::new_micro(CircuitConfig::default());
+
+            let rules_output = rules.tick(&input);
+            let micro_output = micro.tick(&input);
+
+            assert!(micro_output.hold_active);
+            if rules_output.hint_simulate_first {
+                assert!(micro_output.hint_simulate_first);
+            }
+            if rules_output.hint_export_lock {
+                assert!(micro_output.hint_export_lock);
+            }
+        }
+
+        #[test]
+        fn receipt_invalid_forces_hold_active() {
+            assert_micro_superset(StnInput {
+                receipt_invalid_present: true,
+                ..base_input()
+            });
+        }
+
+        #[test]
+        fn integrity_block_forces_hold_active() {
+            assert_micro_superset(StnInput {
+                integrity: IntegrityState::Fail,
+                ..base_input()
+            });
+        }
+
+        #[test]
+        fn dlp_critical_forces_hold_active() {
+            assert_micro_superset(StnInput {
+                dlp_critical_present: true,
+                ..base_input()
+            });
+        }
     }
 }
