@@ -345,6 +345,12 @@ fn build_insula_input(
         hbv_present: false,
         progress,
         dominant_reason_codes: normalized_reason_strings(&frame.reason_codes),
+        arousal: BrainLevel::Low,
+        stability: BrainLevel::Low,
+        threat: BrainLevel::Low,
+        threat_vectors: Vec::new(),
+        pag_pattern: None,
+        stn_hold_active: false,
     }
 }
 
