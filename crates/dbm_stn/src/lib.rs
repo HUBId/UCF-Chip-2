@@ -52,16 +52,13 @@ impl Stn {
         use microcircuit_stn_hold::StnHoldMicrocircuit;
 
         Self {
-            backend: StnBackend::Micro(Box::new(StnHoldMicrocircuit::new(
-                CircuitConfig::default(),
-            ))),
+            backend: StnBackend::Micro(Box::new(
+                StnHoldMicrocircuit::new(CircuitConfig::default()),
+            )),
         }
     }
 
-    #[cfg(all(
-        not(feature = "biophys-stn"),
-        not(feature = "microcircuit-stn-hold")
-    ))]
+    #[cfg(all(not(feature = "biophys-stn"), not(feature = "microcircuit-stn-hold")))]
     pub fn new() -> Self {
         Self {
             backend: StnBackend::Rules(StnRules::new()),
