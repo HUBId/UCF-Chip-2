@@ -1,0 +1,14 @@
+[package]
+name = "microcircuit_amygdala_biophys"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+biophys = ["biophys_runtime/biophys", "biophys_core/biophys"]
+
+[dependencies]
+biophys_core = { path = "../biophys_core" }
+biophys_runtime = { path = "../biophys_runtime" }
+dbm_core = { path = "../dbm_core" }
+microcircuit_amygdala_stub = { path = "../microcircuit_amygdala_stub" }
+microcircuit_core = { path = "../microcircuit_core" }

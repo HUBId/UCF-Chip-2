@@ -2,7 +2,7 @@
 
 use dbm_core::DbmModule;
 pub use microcircuit_amygdala_stub::{AmyInput, AmyOutput, AmyRules};
-#[cfg(feature = "microcircuit-amygdala-pop")]
+#[cfg(any(feature = "microcircuit-amygdala-pop", feature = "biophys-amygdala"))]
 use microcircuit_core::CircuitConfig;
 use microcircuit_core::MicrocircuitBackend;
 use std::fmt;
@@ -37,8 +37,22 @@ pub struct Amygdala {
 
 impl Amygdala {
     pub fn new() -> Self {
-        Self {
-            backend: AmyBackend::Rules(AmyRules::new()),
+        #[cfg(feature = "biophys-amygdala")]
+        {
+            Self::new_biophys(CircuitConfig::default())
+        }
+        #[cfg(all(feature = "microcircuit-amygdala-pop", not(feature = "biophys-amygdala")))]
+        {
+            Self::new_micro(CircuitConfig::default())
+        }
+        #[cfg(all(
+            not(feature = "microcircuit-amygdala-pop"),
+            not(feature = "biophys-amygdala")
+        ))]
+        {
+            Self {
+                backend: AmyBackend::Rules(AmyRules::new()),
+            }
         }
     }
 
@@ -48,6 +62,15 @@ impl Amygdala {
 
         Self {
             backend: AmyBackend::Micro(Box::new(AmygdalaPopMicrocircuit::new(config))),
+        }
+    }
+
+    #[cfg(feature = "biophys-amygdala")]
+    pub fn new_biophys(config: CircuitConfig) -> Self {
+        use microcircuit_amygdala_biophys::AmygdalaBiophysMicrocircuit;
+
+        Self {
+            backend: AmyBackend::Micro(Box::new(AmygdalaBiophysMicrocircuit::new(config))),
         }
     }
 
@@ -99,6 +122,7 @@ mod tests {
             deny_storm_present: false,
             sealed: None,
             tool_anomaly_present: false,
+            cerebellum_tool_anomaly_present: None,
             tool_anomalies: Vec::new(),
             divergence: LevelClass::Low,
         }
@@ -150,6 +174,16 @@ mod tests {
             ..base_input()
         });
 
+        #[cfg(feature = "biophys-amygdala")]
+        assert_eq!(
+            output.vectors,
+            vec![
+                ThreatVector::IntegrityCompromise,
+                ThreatVector::Exfil,
+                ThreatVector::Probing,
+            ]
+        );
+        #[cfg(not(feature = "biophys-amygdala"))]
         assert_eq!(
             output.vectors,
             vec![

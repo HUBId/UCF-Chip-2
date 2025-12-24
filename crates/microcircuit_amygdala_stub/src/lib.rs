@@ -15,6 +15,7 @@ pub struct AmyInput {
     pub deny_storm_present: bool,
     pub sealed: Option<bool>,
     pub tool_anomaly_present: bool,
+    pub cerebellum_tool_anomaly_present: Option<bool>,
     pub tool_anomalies: Vec<(ToolKey, LevelClass)>,
     pub divergence: LevelClass,
 }
@@ -59,6 +60,7 @@ impl AmyRules {
             input.dlp_secret_present || input.dlp_obfuscation_present || input.dlp_stegano_present;
         let probing_present = input.policy_pressure == LevelClass::High;
         let tool_side_effects = input.tool_anomaly_present
+            || input.cerebellum_tool_anomaly_present.unwrap_or(false)
             || input
                 .tool_anomalies
                 .iter()

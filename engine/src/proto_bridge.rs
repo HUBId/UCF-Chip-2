@@ -483,6 +483,7 @@ fn build_amygdala_input(
         deny_storm_present: classified.policy_deny_count >= 5,
         sealed: Some(classified.integrity_state == IntegrityStateClass::Fail),
         tool_anomaly_present: false,
+        cerebellum_tool_anomaly_present: None,
         tool_anomalies: Vec::new(),
         divergence,
     }

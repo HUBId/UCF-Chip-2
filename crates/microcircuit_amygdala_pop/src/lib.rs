@@ -85,6 +85,7 @@ impl AmygdalaPopMicrocircuit {
     fn tool_side_effects_drive(input: &AmyInput) -> u8 {
         let mut drive = 0;
         let tool_anomaly_high = input.tool_anomaly_present
+            || input.cerebellum_tool_anomaly_present.unwrap_or(false)
             || input
                 .tool_anomalies
                 .iter()
@@ -259,6 +260,7 @@ mod tests {
             deny_storm_present: false,
             sealed: None,
             tool_anomaly_present: false,
+            cerebellum_tool_anomaly_present: None,
             tool_anomalies: Vec::new(),
             divergence: LevelClass::Low,
         }

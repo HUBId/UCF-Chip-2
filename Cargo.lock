@@ -187,6 +187,7 @@ name = "dbm_9_amygdala"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
+ "microcircuit_amygdala_biophys",
  "microcircuit_amygdala_pop",
  "microcircuit_amygdala_stub",
  "microcircuit_core",
@@ -401,6 +402,17 @@ name = "memristor_backend"
 version = "0.1.0"
 dependencies = [
  "blake3",
+]
+
+[[package]]
+name = "microcircuit_amygdala_biophys"
+version = "0.1.0"
+dependencies = [
+ "biophys_core",
+ "biophys_runtime",
+ "dbm_core",
+ "microcircuit_amygdala_stub",
+ "microcircuit_core",
 ]
 
 [[package]]

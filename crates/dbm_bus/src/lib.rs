@@ -290,6 +290,11 @@ impl BrainBus {
             tool_anomaly_present: cerebellum_output
                 .as_ref()
                 .is_some_and(|output| !output.tool_anomalies.is_empty()),
+            cerebellum_tool_anomaly_present: Some(
+                cerebellum_output
+                    .as_ref()
+                    .is_some_and(|output| !output.tool_anomalies.is_empty()),
+            ),
             tool_anomalies: cerebellum_output
                 .as_ref()
                 .map(|output| output.tool_anomalies.clone())
