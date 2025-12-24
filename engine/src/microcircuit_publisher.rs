@@ -10,6 +10,7 @@ const CONFIG_VERSION: u32 = 1;
 pub(crate) struct MicrocircuitDigests {
     pub(crate) lc: Option<[u8; 32]>,
     pub(crate) sn: Option<[u8; 32]>,
+    pub(crate) hpa: Option<[u8; 32]>,
 }
 
 impl MicrocircuitDigests {
@@ -17,6 +18,7 @@ impl MicrocircuitDigests {
         Self {
             lc: bus.lc_config_digest(),
             sn: bus.sn_config_digest(),
+            hpa: bus.hpa_config_digest(),
         }
     }
 }
@@ -26,6 +28,7 @@ pub(crate) struct MicrocircuitPublisherState {
     started_at_ms: Option<u64>,
     published_lc_digest: Option<[u8; 32]>,
     published_sn_digest: Option<[u8; 32]>,
+    published_hpa_digest: Option<[u8; 32]>,
 }
 
 impl MicrocircuitPublisherState {
@@ -52,12 +55,22 @@ impl MicrocircuitPublisherState {
                 created_at_ms,
                 writer,
             );
+            publish_module(
+                MicrocircuitModule::Hpa,
+                digests.hpa,
+                &mut self.published_hpa_digest,
+                created_at_ms,
+                writer,
+            );
         } else {
             if digests.lc.is_none() {
                 self.published_lc_digest = None;
             }
             if digests.sn.is_none() {
                 self.published_sn_digest = None;
+            }
+            if digests.hpa.is_none() {
+                self.published_hpa_digest = None;
             }
         }
     }
@@ -141,6 +154,7 @@ mod tests {
         let digests = MicrocircuitDigests {
             lc: Some(digest),
             sn: None,
+            hpa: None,
         };
 
         publisher.maybe_publish(10, digests, Some(&mut writer_impl));
@@ -166,6 +180,7 @@ mod tests {
             MicrocircuitDigests {
                 lc: Some(digest_a),
                 sn: None,
+                hpa: None,
             },
             Some(&mut writer_impl),
         );
@@ -174,6 +189,7 @@ mod tests {
             MicrocircuitDigests {
                 lc: Some(digest_b),
                 sn: None,
+                hpa: None,
             },
             Some(&mut writer_impl),
         );
@@ -192,5 +208,41 @@ mod tests {
 
         assert_eq!(evidence_a.config_digest, evidence_b.config_digest);
         assert_eq!(evidence_a.encode_to_vec(), evidence_b.encode_to_vec());
+    }
+
+    #[test]
+    fn publishes_hpa_once_per_digest() {
+        let mut publisher = MicrocircuitPublisherState::default();
+        let writer = Arc::new(Mutex::new(Vec::new()));
+        let mut writer_impl = RecordingWriter {
+            commits: writer.clone(),
+        };
+        let digest = [9u8; 32];
+
+        publisher.maybe_publish(
+            100,
+            MicrocircuitDigests {
+                lc: None,
+                sn: None,
+                hpa: Some(digest),
+            },
+            Some(&mut writer_impl),
+        );
+        publisher.maybe_publish(
+            200,
+            MicrocircuitDigests {
+                lc: None,
+                sn: None,
+                hpa: Some(digest),
+            },
+            Some(&mut writer_impl),
+        );
+
+        let commits = writer.lock().unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].module, MicrocircuitModule::Hpa as i32);
+        assert_eq!(commits[0].config_digest, digest.to_vec());
+        assert_eq!(commits[0].config_version, CONFIG_VERSION);
+        assert_eq!(commits[0].created_at_ms, 100);
     }
 }

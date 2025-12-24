@@ -103,6 +103,7 @@ pub mod v1 {
         Unknown = 0,
         Lc = 1,
         Sn = 2,
+        Hpa = 3,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]

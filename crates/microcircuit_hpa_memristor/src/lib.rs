@@ -382,6 +382,29 @@ mod tests {
     }
 
     #[test]
+    fn config_digest_ignores_state_changes() {
+        let mut circuit = build_circuit();
+        let baseline_digest = circuit.config_digest();
+        let input = HpaInput {
+            integrity_state: IntegrityState::Fail,
+            replay_mismatch_present: true,
+            dlp_critical_present: true,
+            receipt_invalid_present: true,
+            deny_storm_present: true,
+            timeouts_burst_present: true,
+            unlock_present: false,
+            stable_medium_window: false,
+            calibrate_now: true,
+        };
+
+        for _ in 0..10 {
+            circuit.step(&input, 0);
+        }
+
+        assert_eq!(baseline_digest, circuit.config_digest());
+    }
+
+    #[test]
     fn micro_is_no_less_conservative_than_rules_for_critical_inputs() {
         #[derive(Default)]
         struct HpaState {
