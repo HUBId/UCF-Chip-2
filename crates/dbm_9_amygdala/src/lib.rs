@@ -2,7 +2,9 @@
 
 use dbm_core::DbmModule;
 pub use microcircuit_amygdala_stub::{AmyInput, AmyOutput, AmyRules};
-use microcircuit_core::{CircuitConfig, MicrocircuitBackend};
+#[cfg(feature = "microcircuit-amygdala-pop")]
+use microcircuit_core::CircuitConfig;
+use microcircuit_core::MicrocircuitBackend;
 use std::fmt;
 
 pub enum AmyBackend {
