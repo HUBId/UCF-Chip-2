@@ -165,14 +165,10 @@ mod tests {
             base_input(),
         ];
 
-        let outputs_left: Vec<StnOutput> = sequence
-            .iter()
-            .map(|input| left.step(input, 0))
-            .collect();
-        let outputs_right: Vec<StnOutput> = sequence
-            .iter()
-            .map(|input| right.step(input, 0))
-            .collect();
+        let outputs_left: Vec<StnOutput> =
+            sequence.iter().map(|input| left.step(input, 0)).collect();
+        let outputs_right: Vec<StnOutput> =
+            sequence.iter().map(|input| right.step(input, 0)).collect();
 
         assert_eq!(outputs_left, outputs_right);
     }
