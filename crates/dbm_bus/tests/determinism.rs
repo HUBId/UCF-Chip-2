@@ -36,6 +36,7 @@ fn canonical_brain_input() -> BrainInput {
             timeouts_burst_present: true,
             unlock_present: false,
             stable_medium_window: false,
+            calibrate_now: false,
         },
         cbv: Some(CharacterBaselineVector::default()),
         pev: Some(PolicyEcologyVector::default()),

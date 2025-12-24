@@ -1,0 +1,15 @@
+[package]
+name = "microcircuit_hpa_memristor"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dbm_core = { path = "../dbm_core" }
+microcircuit_core = { path = "../microcircuit_core" }
+memristor_backend = { path = "../memristor_backend" }
+
+[features]
+microcircuit-hpa-hw = ["memristor_backend/microcircuit-hpa-hw"]

@@ -78,6 +78,7 @@ fn hbv_from_hpa() -> HbvOffsets {
         timeouts_burst_present: true,
         unlock_present: false,
         stable_medium_window: false,
+        calibrate_now: false,
     });
 
     HbvOffsets {

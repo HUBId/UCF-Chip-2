@@ -204,6 +204,9 @@ name = "dbm_hpa"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
+ "memristor_backend",
+ "microcircuit_core",
+ "microcircuit_hpa_memristor",
  "serde",
  "serde_json",
 ]
@@ -372,6 +375,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 
 [[package]]
+name = "memristor_backend"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+]
+
+[[package]]
 name = "microcircuit_amygdala_pop"
 version = "0.1.0"
 dependencies = [
@@ -424,6 +434,15 @@ name = "microcircuit_dopamin_stub"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
+ "microcircuit_core",
+]
+
+[[package]]
+name = "microcircuit_hpa_memristor"
+version = "0.1.0"
+dependencies = [
+ "dbm_core",
+ "memristor_backend",
  "microcircuit_core",
 ]
 

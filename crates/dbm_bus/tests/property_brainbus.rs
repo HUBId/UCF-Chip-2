@@ -47,6 +47,7 @@ fn make_input(
             timeouts_burst_present: timeout_count_medium >= 10,
             unlock_present,
             stable_medium_window: false,
+            calibrate_now: false,
         },
         cbv: Some(CharacterBaselineVector::default()),
         pev: Some(PolicyEcologyVector::default()),

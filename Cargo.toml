@@ -27,6 +27,8 @@ members = [
     "crates/baseline_resolver",
     "crates/dbm_bus",
     "crates/microcircuit_core",
+    "crates/memristor_backend",
+    "crates/microcircuit_hpa_memristor",
     "crates/microcircuit_hypothalamus_setpoint",
     "crates/microcircuit_sn_stub",
     "crates/microcircuit_sn_attractor",

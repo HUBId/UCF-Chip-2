@@ -17,6 +17,7 @@ fn hpa_counters_saturate_under_stress() {
         timeouts_burst_present: true,
         unlock_present: false,
         stable_medium_window: false,
+        calibrate_now: false,
     };
 
     for _ in 0..200 {

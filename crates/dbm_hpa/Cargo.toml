@@ -8,5 +8,12 @@ path = "src/lib.rs"
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
+memristor_backend = { path = "../memristor_backend", optional = true }
+microcircuit_core = { path = "../microcircuit_core", optional = true }
+microcircuit_hpa_memristor = { path = "../microcircuit_hpa_memristor" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[features]
+microcircuit-hpa-emulated = ["memristor_backend", "microcircuit_core"]
+microcircuit-hpa-hw = ["microcircuit-hpa-emulated", "microcircuit_hpa_memristor/microcircuit-hpa-hw"]

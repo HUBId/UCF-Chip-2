@@ -1,17 +1,35 @@
 #![forbid(unsafe_code)]
 
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 use std::fs::File;
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
+use std::path::Path;
+use std::path::PathBuf;
 
-use dbm_core::{DbmComponent, IntegrityState, LevelClass, ReasonSet};
+use dbm_core::DbmComponent;
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
+use dbm_core::{IntegrityState, LevelClass, ReasonSet};
+#[cfg(feature = "microcircuit-hpa-emulated")]
+use memristor_backend::EmulatedMemristorBackend;
+#[cfg(feature = "microcircuit-hpa-emulated")]
+use microcircuit_core::{CircuitConfig, MicrocircuitBackend};
+#[cfg(feature = "microcircuit-hpa-emulated")]
+use microcircuit_hpa_memristor::HpaCircuit;
+pub use microcircuit_hpa_memristor::{HpaInput, HpaOutput};
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 const MAX_CELL_VALUE: u16 = 100;
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 const STABLE_DECAY_INTERVAL: u16 = 5;
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 const OFFSET_MAX: u16 = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 pub struct HpaState {
     pub allostatic_load: u16,
     pub exfil_sensitivity: u16,
@@ -22,66 +40,20 @@ pub struct HpaState {
     pub stable_window_counter: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HpaInput {
-    pub integrity_state: IntegrityState,
-    pub replay_mismatch_present: bool,
-    pub dlp_critical_present: bool,
-    pub receipt_invalid_present: bool,
-    pub deny_storm_present: bool,
-    pub timeouts_burst_present: bool,
-    pub unlock_present: bool,
-    pub stable_medium_window: bool,
-}
-
-impl Default for HpaInput {
-    fn default() -> Self {
-        Self {
-            integrity_state: IntegrityState::Ok,
-            replay_mismatch_present: false,
-            dlp_critical_present: false,
-            receipt_invalid_present: false,
-            deny_storm_present: false,
-            timeouts_burst_present: false,
-            unlock_present: false,
-            stable_medium_window: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HpaOutput {
-    pub allostatic_load_class: LevelClass,
-    pub baseline_caution_offset: u16,
-    pub baseline_novelty_dampening_offset: u16,
-    pub baseline_approval_strictness_offset: u16,
-    pub baseline_export_strictness_offset: u16,
-    pub baseline_chain_conservatism_offset: u16,
-    pub baseline_cooldown_multiplier_class: u16,
-    pub reason_codes: ReasonSet,
-}
-
-impl Default for HpaOutput {
-    fn default() -> Self {
-        Self {
-            allostatic_load_class: LevelClass::Low,
-            baseline_caution_offset: 0,
-            baseline_novelty_dampening_offset: 0,
-            baseline_approval_strictness_offset: 0,
-            baseline_export_strictness_offset: 0,
-            baseline_chain_conservatism_offset: 0,
-            baseline_cooldown_multiplier_class: 0,
-            reason_codes: ReasonSet::default(),
-        }
-    }
-}
-
 #[derive(Debug)]
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 pub struct Hpa {
     store_path: PathBuf,
     state: HpaState,
 }
 
+#[derive(Debug)]
+#[cfg(feature = "microcircuit-hpa-emulated")]
+pub struct Hpa {
+    circuit: HpaCircuit<EmulatedMemristorBackend>,
+}
+
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 impl Default for Hpa {
     fn default() -> Self {
         #[cfg(test)]
@@ -98,6 +70,14 @@ impl Default for Hpa {
     }
 }
 
+#[cfg(feature = "microcircuit-hpa-emulated")]
+impl Default for Hpa {
+    fn default() -> Self {
+        Self::new(PathBuf::from("hpa_state.json"))
+    }
+}
+
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 impl Hpa {
     pub fn new(store_path: impl Into<PathBuf>) -> Self {
         let store_path = store_path.into();
@@ -275,8 +255,26 @@ impl Hpa {
     }
 }
 
+#[cfg(feature = "microcircuit-hpa-emulated")]
+impl Hpa {
+    pub fn new(_store_path: impl Into<PathBuf>) -> Self {
+        let config = CircuitConfig::default();
+        let circuit = HpaCircuit::new_emulated(config);
+        Self { circuit }
+    }
+
+    pub fn tick(&mut self, input: &HpaInput) -> HpaOutput {
+        self.circuit.step(input, 0)
+    }
+
+    pub fn current_output(&self) -> HpaOutput {
+        self.circuit.current_output()
+    }
+}
+
 impl DbmComponent for Hpa {}
 
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 fn div_ceil(value: u16, divisor: u16) -> u16 {
     if value == 0 {
         0
@@ -285,10 +283,12 @@ fn div_ceil(value: u16, divisor: u16) -> u16 {
     }
 }
 
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 fn clamp_offset(value: u16) -> u16 {
     value.min(OFFSET_MAX)
 }
 
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 fn load_state(path: &Path) -> Option<HpaState> {
     let mut file = File::open(path).ok()?;
     let mut buf = String::new();
@@ -296,6 +296,7 @@ fn load_state(path: &Path) -> Option<HpaState> {
     serde_json::from_str(&buf).ok()
 }
 
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 fn save_state(path: &Path, state: &HpaState) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -311,6 +312,7 @@ fn save_state(path: &Path, state: &HpaState) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "microcircuit-hpa-emulated"))]
 mod tests {
     use super::*;
     use std::fs;

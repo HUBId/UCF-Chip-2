@@ -414,6 +414,7 @@ fn build_hpa_input(
         timeouts_burst_present: classified.exec_timeout_count >= 2,
         unlock_present: unlock_ready,
         stable_medium_window,
+        calibrate_now: false,
     }
 }
 
