@@ -41,6 +41,8 @@ members = [
     "crates/microcircuit_pag_attractor",
     "crates/microcircuit_stn_stub",
     "crates/microcircuit_stn_hold",
+    "crates/microcircuit_pmrf_stub",
+    "crates/microcircuit_pmrf_rhythm",
 ]
 resolver = "2"
 

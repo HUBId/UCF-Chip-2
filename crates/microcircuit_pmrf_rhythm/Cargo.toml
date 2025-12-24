@@ -1,16 +1,12 @@
 [package]
-name = "dbm_pmrf"
+name = "microcircuit_pmrf_rhythm"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
 path = "src/lib.rs"
 
-[features]
-microcircuit-pmrf-rhythm = ["dep:microcircuit_pmrf_rhythm"]
-
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_pmrf_stub = { path = "../microcircuit_pmrf_stub" }
-microcircuit_pmrf_rhythm = { path = "../microcircuit_pmrf_rhythm", optional = true }

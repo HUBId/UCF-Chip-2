@@ -1,0 +1,10 @@
+[package]
+name = "microcircuit_pmrf_stub"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dbm_core = { path = "../dbm_core" }
