@@ -75,7 +75,7 @@ impl L4Solver {
         let mut paired: Vec<(CompartmentId, Compartment, CompartmentChannels)> = morphology
             .compartments
             .into_iter()
-            .zip(channels.into_iter())
+            .zip(channels)
             .map(|(compartment, channel)| (compartment.id, compartment, channel))
             .collect();
 
