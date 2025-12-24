@@ -1,8 +1,11 @@
 [package]
-name = "biophys_core"
+name = "biophys_morphology"
 version = "0.1.0"
 edition = "2021"
 
 [features]
 biophys = []
 biophys-l4 = ["biophys"]
+
+[dependencies]
+biophys_core = { path = "../biophys_core" }

@@ -10,3 +10,4 @@ blake3 = "1"
 
 [features]
 biophys = []
+biophys-l4 = ["biophys"]

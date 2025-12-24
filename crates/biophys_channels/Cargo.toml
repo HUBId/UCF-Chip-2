@@ -1,8 +1,10 @@
 [package]
-name = "biophys_core"
+name = "biophys_channels"
 version = "0.1.0"
 edition = "2021"
 
 [features]
 biophys = []
 biophys-l4 = ["biophys"]
+
+[dependencies]

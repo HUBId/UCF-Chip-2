@@ -1,0 +1,257 @@
+#![forbid(unsafe_code)]
+
+use biophys_channels::{leak_current, nak_current, GatingState, Leak, NaK};
+use biophys_core::{CompartmentId, NeuronId};
+use biophys_morphology::{Compartment, CompartmentKind, MorphologyError, NeuronMorphology};
+
+pub const MAX_COMPARTMENTS: usize = 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CompartmentChannels {
+    pub leak: Leak,
+    pub nak: Option<NaK>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct L4State {
+    pub voltages: Vec<f32>,
+    pub gates: Vec<GatingState>,
+}
+
+impl L4State {
+    pub fn new(initial_voltage: f32, compartment_count: usize) -> Self {
+        let voltages = vec![initial_voltage; compartment_count];
+        let gates = voltages
+            .iter()
+            .map(|&v| GatingState::from_voltage(v))
+            .collect();
+        Self { voltages, gates }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct L4Solver {
+    morphology: NeuronMorphology,
+    channels: Vec<CompartmentChannels>,
+    parent_indices: Vec<Option<usize>>,
+    dt_ms: f32,
+    clamp_min: f32,
+    clamp_max: f32,
+    step_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SolverError {
+    Morphology(MorphologyError),
+    ChannelCountMismatch { expected: usize, got: usize },
+    DuplicateCompartmentId(CompartmentId),
+    MissingParent { child: CompartmentId, parent: CompartmentId },
+}
+
+impl L4Solver {
+    pub fn new(
+        morphology: NeuronMorphology,
+        channels: Vec<CompartmentChannels>,
+        dt_ms: f32,
+        clamp_min: f32,
+        clamp_max: f32,
+    ) -> Result<Self, SolverError> {
+        morphology
+            .validate(MAX_COMPARTMENTS)
+            .map_err(SolverError::Morphology)?;
+        if morphology.compartments.len() != channels.len() {
+            return Err(SolverError::ChannelCountMismatch {
+                expected: morphology.compartments.len(),
+                got: channels.len(),
+            });
+        }
+
+        let mut paired: Vec<(CompartmentId, Compartment, CompartmentChannels)> = morphology
+            .compartments
+            .into_iter()
+            .zip(channels.into_iter())
+            .map(|(compartment, channel)| (compartment.id, compartment, channel))
+            .collect();
+
+        paired.sort_by_key(|(id, _, _)| id.0);
+
+        for window in paired.windows(2) {
+            if let [left, right] = window {
+                if left.0 == right.0 {
+                    return Err(SolverError::DuplicateCompartmentId(left.0));
+                }
+            }
+        }
+
+        let mut compartments = Vec::with_capacity(paired.len());
+        let mut channels = Vec::with_capacity(paired.len());
+        for (_, compartment, channel) in paired {
+            compartments.push(compartment);
+            channels.push(channel);
+        }
+
+        let morphology = NeuronMorphology {
+            neuron_id: morphology.neuron_id,
+            compartments,
+        };
+
+        let mut id_to_index = std::collections::BTreeMap::new();
+        for (index, compartment) in morphology.compartments.iter().enumerate() {
+            id_to_index.insert(compartment.id, index);
+        }
+
+        let mut parent_indices = Vec::with_capacity(morphology.compartments.len());
+        for compartment in &morphology.compartments {
+            let parent_index = match compartment.parent {
+                Some(parent_id) => id_to_index.get(&parent_id).copied().ok_or(
+                    SolverError::MissingParent {
+                        child: compartment.id,
+                        parent: parent_id,
+                    },
+                )?,
+                None => None,
+            };
+            parent_indices.push(parent_index);
+        }
+
+        Ok(Self {
+            morphology,
+            channels,
+            parent_indices,
+            dt_ms,
+            clamp_min,
+            clamp_max,
+            step_count: 0,
+        })
+    }
+
+    pub fn neuron_id(&self) -> NeuronId {
+        self.morphology.neuron_id
+    }
+
+    pub fn step_count(&self) -> u64 {
+        self.step_count
+    }
+
+    pub fn step(&mut self, state: &mut L4State, input_current: &[f32]) {
+        assert_eq!(
+            state.voltages.len(),
+            self.morphology.compartments.len(),
+            "state voltage count must match compartments"
+        );
+        assert_eq!(
+            input_current.len(),
+            self.morphology.compartments.len(),
+            "input current count must match compartments"
+        );
+
+        for (v, gates) in state.voltages.iter().copied().zip(state.gates.iter_mut()) {
+            gates.update(v, self.dt_ms);
+        }
+
+        let mut axial_currents = vec![0.0_f32; self.morphology.compartments.len()];
+        for (index, compartment) in self.morphology.compartments.iter().enumerate() {
+            if let Some(parent_index) = self.parent_indices[index] {
+                let v_child = state.voltages[index];
+                let v_parent = state.voltages[parent_index];
+                let resistance = compartment.axial_resistance.max(1e-6);
+                let current = (v_parent - v_child) / resistance;
+                axial_currents[index] += current;
+                axial_currents[parent_index] -= current;
+            }
+        }
+
+        for index in 0..self.morphology.compartments.len() {
+            let compartment = &self.morphology.compartments[index];
+            let channels = self.channels[index];
+            let v = state.voltages[index];
+            let gates = state.gates[index];
+            let mut ionic = leak_current(channels.leak, v);
+            if let Some(nak) = channels.nak {
+                ionic += nak_current(nak, gates, v);
+            }
+            let axial = axial_currents[index];
+            let ext = input_current[index];
+            let capacitance = compartment.capacitance.max(1e-6);
+            let dv = self.dt_ms * (ext + axial - ionic) / capacitance;
+            let updated = (v + dv).clamp(self.clamp_min, self.clamp_max);
+            state.voltages[index] = updated;
+        }
+
+        self.step_count = self.step_count.saturating_add(1);
+    }
+
+    pub fn config_digest(&self) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"UCF:L4:CFG");
+        update_u32(&mut hasher, self.morphology.neuron_id.0);
+        update_u32(&mut hasher, self.morphology.compartments.len() as u32);
+        for (compartment, channels) in self
+            .morphology
+            .compartments
+            .iter()
+            .zip(self.channels.iter())
+        {
+            update_u32(&mut hasher, compartment.id.0);
+            update_u32(
+                &mut hasher,
+                compartment.parent.map_or(u32::MAX, |id| id.0),
+            );
+            update_u8(&mut hasher, compartment_kind_code(compartment.kind));
+            update_f32(&mut hasher, compartment.capacitance);
+            update_f32(&mut hasher, compartment.axial_resistance);
+            update_f32(&mut hasher, channels.leak.g);
+            update_f32(&mut hasher, channels.leak.e_rev);
+            match channels.nak {
+                Some(nak) => {
+                    update_u8(&mut hasher, 1);
+                    update_f32(&mut hasher, nak.g_na);
+                    update_f32(&mut hasher, nak.g_k);
+                    update_f32(&mut hasher, nak.e_na);
+                    update_f32(&mut hasher, nak.e_k);
+                }
+                None => {
+                    update_u8(&mut hasher, 0);
+                }
+            }
+        }
+        *hasher.finalize().as_bytes()
+    }
+
+    pub fn snapshot_digest(&self, state: &L4State) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"UCF:L4:SNAP");
+        update_u64(&mut hasher, self.step_count);
+        update_u32(&mut hasher, state.voltages.len() as u32);
+        for (v, gates) in state.voltages.iter().zip(state.gates.iter()) {
+            update_f32(&mut hasher, *v);
+            update_f32(&mut hasher, gates.m);
+            update_f32(&mut hasher, gates.h);
+            update_f32(&mut hasher, gates.n);
+        }
+        *hasher.finalize().as_bytes()
+    }
+}
+
+fn compartment_kind_code(kind: CompartmentKind) -> u8 {
+    match kind {
+        CompartmentKind::Soma => 0,
+        CompartmentKind::Dendrite => 1,
+    }
+}
+
+fn update_u8(hasher: &mut blake3::Hasher, value: u8) {
+    hasher.update(&[value]);
+}
+
+fn update_u32(hasher: &mut blake3::Hasher, value: u32) {
+    hasher.update(&value.to_le_bytes());
+}
+
+fn update_u64(hasher: &mut blake3::Hasher, value: u64) {
+    hasher.update(&value.to_le_bytes());
+}
+
+fn update_f32(hasher: &mut blake3::Hasher, value: f32) {
+    hasher.update(&value.to_bits().to_le_bytes());
+}

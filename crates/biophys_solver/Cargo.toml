@@ -8,3 +8,4 @@ biophys_core = { path = "../biophys_core" }
 
 [features]
 biophys = []
+biophys-l4 = ["biophys"]
