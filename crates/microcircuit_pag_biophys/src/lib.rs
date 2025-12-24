@@ -341,7 +341,12 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
     let mut edges = Vec::new();
     let mut params = Vec::new();
 
-    let pool_starts = [DP1_POOL_START, DP2_POOL_START, DP3_POOL_START, DP4_POOL_START];
+    let pool_starts = [
+        DP1_POOL_START,
+        DP2_POOL_START,
+        DP3_POOL_START,
+        DP4_POOL_START,
+    ];
 
     for &start in &pool_starts {
         for pre in start..start + POOL_SIZE {
