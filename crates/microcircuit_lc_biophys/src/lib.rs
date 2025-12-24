@@ -142,8 +142,8 @@ impl LcMicrocircuit {
     fn build_inputs(input: &LcInput) -> [i32; NEURON_COUNT] {
         let mut currents = [0i32; NEURON_COUNT];
         let tonic = Self::tonic_current(input.arousal_floor);
-        for idx in 0..EXCITATORY_COUNT {
-            currents[idx] = currents[idx].saturating_add(tonic);
+        for current in currents.iter_mut().take(EXCITATORY_COUNT) {
+            *current = current.saturating_add(tonic);
         }
 
         if input.integrity != IntegrityState::Ok {
@@ -153,8 +153,8 @@ impl LcMicrocircuit {
         }
 
         if input.receipt_invalid_count_short >= 1 {
-            for idx in 0..EXCITATORY_COUNT {
-                currents[idx] = currents[idx].saturating_add(CURRENT_STRONG);
+            for current in currents.iter_mut().take(EXCITATORY_COUNT) {
+                *current = current.saturating_add(CURRENT_STRONG);
             }
         }
 
