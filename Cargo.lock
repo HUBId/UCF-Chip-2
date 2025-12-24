@@ -41,6 +41,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "biophys_assets"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+]
+
+[[package]]
 name = "biophys_core"
 version = "0.1.0"
 
@@ -534,6 +541,7 @@ dependencies = [
 name = "microcircuit_lc_spike"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_core",
  "microcircuit_lc_stub",

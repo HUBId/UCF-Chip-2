@@ -59,6 +59,7 @@ members = [
     "crates/microcircuit_insula_stub",
     "crates/microcircuit_insula_fusion",
     "crates/biophys_core",
+    "crates/biophys_assets",
     "crates/biophys_solver",
     "crates/biophys_runtime",
 ]
