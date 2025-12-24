@@ -41,7 +41,10 @@ impl Amygdala {
         {
             Self::new_biophys(CircuitConfig::default())
         }
-        #[cfg(all(feature = "microcircuit-amygdala-pop", not(feature = "biophys-amygdala")))]
+        #[cfg(all(
+            feature = "microcircuit-amygdala-pop",
+            not(feature = "biophys-amygdala")
+        ))]
         {
             Self::new_micro(CircuitConfig::default())
         }

@@ -134,8 +134,10 @@ impl AmygdalaBiophysMicrocircuit {
     }
 
     fn build_inputs(input: &AmyInput) -> [i32; NEURON_COUNT] {
-        let integrity_drive = matches!(input.integrity, IntegrityState::Fail | IntegrityState::Degraded)
-            || input.replay_mismatch_present
+        let integrity_drive = matches!(
+            input.integrity,
+            IntegrityState::Fail | IntegrityState::Degraded
+        ) || input.replay_mismatch_present
             || input.receipt_invalid_medium >= 1;
         let exfil_drive =
             input.dlp_secret_present || input.dlp_obfuscation_present || input.dlp_stegano_present;
@@ -246,12 +248,8 @@ impl MicrocircuitBackend<AmyInput, AmyOutput> for AmygdalaBiophysMicrocircuit {
             LevelClass::Low
         };
 
-        let vectors = Self::build_vectors(
-            integrity_active,
-            exfil_active,
-            probing_active,
-            tool_active,
-        );
+        let vectors =
+            Self::build_vectors(integrity_active, exfil_active, probing_active, tool_active);
 
         let mut reason_codes = ReasonSet::default();
         if integrity_active {
