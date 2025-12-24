@@ -16,3 +16,6 @@ microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_stn_stub = { path = "../microcircuit_stn_stub" }
 microcircuit_stn_hold = { path = "../microcircuit_stn_hold", optional = true }
 microcircuit_stn_biophys = { path = "../microcircuit_stn_biophys", optional = true }
+
+[dev-dependencies]
+biophys_core = { path = "../biophys_core" }

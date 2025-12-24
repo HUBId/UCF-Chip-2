@@ -8,6 +8,7 @@ fn stp_updates_are_deterministic() {
         u: 200,
         tau_rec_steps: 2,
         tau_fac_steps: 2,
+        mod_channel: None,
     };
     let mut state = StpState {
         x: STP_SCALE,

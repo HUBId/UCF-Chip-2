@@ -21,3 +21,6 @@ microcircuit_amygdala_stub = { path = "../microcircuit_amygdala_stub" }
 microcircuit_amygdala_pop = { path = "../microcircuit_amygdala_pop", optional = true }
 microcircuit_amygdala_biophys = { path = "../microcircuit_amygdala_biophys", optional = true }
 microcircuit_core = { path = "../microcircuit_core" }
+
+[dev-dependencies]
+biophys_core = { path = "../biophys_core" }

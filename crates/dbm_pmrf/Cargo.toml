@@ -22,3 +22,6 @@ microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_pmrf_stub = { path = "../microcircuit_pmrf_stub" }
 microcircuit_pmrf_rhythm = { path = "../microcircuit_pmrf_rhythm", optional = true }
 microcircuit_pmrf_biophys = { path = "../microcircuit_pmrf_biophys", optional = true }
+
+[dev-dependencies]
+biophys_core = { path = "../biophys_core" }

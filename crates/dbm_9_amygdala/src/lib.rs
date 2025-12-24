@@ -110,6 +110,7 @@ impl DbmModule for Amygdala {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
     use dbm_core::{IntegrityState, LevelClass, ThreatVector};
 
     fn base_input() -> AmyInput {
@@ -128,6 +129,7 @@ mod tests {
             cerebellum_tool_anomaly_present: None,
             tool_anomalies: Vec::new(),
             divergence: LevelClass::Low,
+            modulators: ModulatorField::default(),
         }
     }
 

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use biophys_core::ModulatorField;
 use dbm_core::{DbmModule, LevelClass, ReasonSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -17,6 +18,7 @@ pub struct PmrfInput {
     pub stability: LevelClass,
     pub hold_active: bool,
     pub budget_stress: LevelClass,
+    pub modulators: ModulatorField,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +92,7 @@ impl DbmModule for PmrfRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
 
     fn base_input() -> PmrfInput {
         PmrfInput {
@@ -98,6 +101,7 @@ mod tests {
             stability: LevelClass::Low,
             hold_active: false,
             budget_stress: LevelClass::Low,
+            modulators: ModulatorField::default(),
         }
     }
 

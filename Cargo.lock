@@ -186,6 +186,7 @@ dependencies = [
 name = "dbm_9_amygdala"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_amygdala_biophys",
  "microcircuit_amygdala_pop",
@@ -198,6 +199,7 @@ name = "dbm_bus"
 version = "0.1.0"
 dependencies = [
  "baseline_resolver",
+ "biophys_core",
  "dbm_0_sn",
  "dbm_12_insula",
  "dbm_13_hypothalamus",
@@ -238,6 +240,7 @@ dependencies = [
 name = "dbm_pag"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_core",
  "microcircuit_pag_attractor",
@@ -249,6 +252,7 @@ dependencies = [
 name = "dbm_pmrf"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_core",
  "microcircuit_pmrf_biophys",
@@ -278,6 +282,7 @@ dependencies = [
 name = "dbm_stn"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_core",
  "microcircuit_stn_biophys",
@@ -304,6 +309,7 @@ name = "engine"
 version = "0.1.0"
 dependencies = [
  "baseline_resolver",
+ "biophys_core",
  "blake3",
  "chip4",
  "dbm_0_sn",
@@ -422,6 +428,7 @@ dependencies = [
 name = "microcircuit_amygdala_pop"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_amygdala_stub",
  "microcircuit_core",
@@ -431,6 +438,7 @@ dependencies = [
 name = "microcircuit_amygdala_stub"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
 ]
 
@@ -535,6 +543,7 @@ dependencies = [
 name = "microcircuit_lc_stub"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_core",
 ]
@@ -543,6 +552,7 @@ dependencies = [
 name = "microcircuit_pag_attractor"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_core",
  "microcircuit_pag_stub",
@@ -563,6 +573,7 @@ dependencies = [
 name = "microcircuit_pag_stub"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
 ]
 
@@ -581,6 +592,7 @@ dependencies = [
 name = "microcircuit_pmrf_rhythm"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_core",
  "microcircuit_pmrf_stub",
@@ -590,6 +602,7 @@ dependencies = [
 name = "microcircuit_pmrf_stub"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
 ]
 
@@ -650,6 +663,7 @@ dependencies = [
 name = "microcircuit_sn_stub"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_core",
 ]
@@ -669,6 +683,7 @@ dependencies = [
 name = "microcircuit_stn_hold"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
  "microcircuit_core",
  "microcircuit_stn_stub",
@@ -678,6 +693,7 @@ dependencies = [
 name = "microcircuit_stn_stub"
 version = "0.1.0"
 dependencies = [
+ "biophys_core",
  "dbm_core",
 ]
 

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use biophys_core::ModulatorField;
 use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet};
 
 #[derive(Debug, Clone, Default)]
@@ -12,6 +13,7 @@ pub struct StnInput {
     pub integrity: IntegrityState,
     pub tool_side_effects_present: bool,
     pub cerebellum_divergence: LevelClass,
+    pub modulators: ModulatorField,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -81,6 +83,7 @@ fn level_at_least(value: LevelClass, threshold: LevelClass) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
 
     fn base_input() -> StnInput {
         StnInput {
@@ -92,6 +95,7 @@ mod tests {
             integrity: IntegrityState::Ok,
             tool_side_effects_present: false,
             cerebellum_divergence: LevelClass::Low,
+            modulators: ModulatorField::default(),
         }
     }
 

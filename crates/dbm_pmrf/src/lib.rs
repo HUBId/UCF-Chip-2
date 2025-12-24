@@ -96,6 +96,7 @@ impl DbmModule for Pmrf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
     use dbm_core::LevelClass;
 
     fn base_input() -> PmrfInput {
@@ -105,6 +106,7 @@ mod tests {
             stability: LevelClass::Low,
             hold_active: false,
             budget_stress: LevelClass::Low,
+            modulators: ModulatorField::default(),
         }
     }
 

@@ -1,4 +1,5 @@
 use blake3::Hasher;
+use biophys_core::ModulatorField;
 use dbm_12_insula::InsulaInput;
 use dbm_18_cerebellum::{CerInput, ToolFailureCounts};
 use dbm_6_dopamin_nacc::DopaInput;
@@ -82,6 +83,7 @@ pub fn brain_input_from_signal_frame(
             timeout_count_short: counters.short_timeout_count,
             deny_count_short: counters.short_deny_count,
             arousal_floor: BrainLevel::Low,
+            modulators: ModulatorField::default(),
         },
         serotonin: SerInput {
             integrity: to_brain_integrity(classified.integrity_state),
@@ -105,6 +107,7 @@ pub fn brain_input_from_signal_frame(
             unlock_present: rsv.unlock_ready,
             stability: BrainLevel::Low,
             serotonin_cooldown: BrainCooldown::Base,
+            modulators: ModulatorField::default(),
         },
         cerebellum: build_cerebellum_input(&normalized_frame, classified),
         stn: StnInput {
@@ -116,6 +119,7 @@ pub fn brain_input_from_signal_frame(
             integrity: to_brain_integrity(classified.integrity_state),
             tool_side_effects_present: false,
             cerebellum_divergence: BrainLevel::Low,
+            modulators: ModulatorField::default(),
         },
         pmrf: PmrfInput {
             divergence: to_brain_level(rsv.divergence),
@@ -123,6 +127,7 @@ pub fn brain_input_from_signal_frame(
             stability: BrainLevel::Low,
             hold_active: false,
             budget_stress: to_brain_level(rsv.budget_stress),
+            modulators: ModulatorField::default(),
         },
         dopamin: dopamin_input,
         insula: build_insula_input(
@@ -486,6 +491,7 @@ fn build_amygdala_input(
         cerebellum_tool_anomaly_present: None,
         tool_anomalies: Vec::new(),
         divergence,
+        modulators: ModulatorField::default(),
     }
 }
 

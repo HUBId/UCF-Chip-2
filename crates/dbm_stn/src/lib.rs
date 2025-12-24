@@ -116,6 +116,7 @@ impl DbmModule for Stn {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
     use dbm_core::{IntegrityState, LevelClass};
 
     fn base_input() -> StnInput {
@@ -128,6 +129,7 @@ mod tests {
             integrity: IntegrityState::Ok,
             tool_side_effects_present: false,
             cerebellum_divergence: LevelClass::Low,
+            modulators: ModulatorField::default(),
         }
     }
 

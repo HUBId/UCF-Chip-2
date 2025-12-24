@@ -134,6 +134,7 @@ impl MicrocircuitBackend<StnInput, StnOutput> for StnHoldMicrocircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
 
     fn base_input() -> StnInput {
         StnInput {
@@ -145,6 +146,7 @@ mod tests {
             integrity: IntegrityState::Ok,
             tool_side_effects_present: false,
             cerebellum_divergence: LevelClass::Low,
+            modulators: ModulatorField::default(),
         }
     }
 

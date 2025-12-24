@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use biophys_core::ModulatorField;
 use dbm_core::{IntegrityState, LevelClass, ReasonSet, ThreatVector, ToolKey};
 
 #[derive(Debug, Clone, Default)]
@@ -18,6 +19,7 @@ pub struct AmyInput {
     pub cerebellum_tool_anomaly_present: Option<bool>,
     pub tool_anomalies: Vec<(ToolKey, LevelClass)>,
     pub divergence: LevelClass,
+    pub modulators: ModulatorField,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

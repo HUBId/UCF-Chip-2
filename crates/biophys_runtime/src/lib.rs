@@ -1,7 +1,14 @@
 #![forbid(unsafe_code)]
 
-use biophys_core::{clamp_usize, LifParams, LifState, NeuronId, PopCode, StpParams, SynapseEdge};
+use biophys_core::{
+    clamp_i32, clamp_usize, level_mul, LifParams, LifState, ModChannel, ModLevel, ModulatorField,
+    NeuronId, PopCode, StpParams, SynapseEdge, STP_SCALE,
+};
 use biophys_solver::{LifSolver, StepSolver};
+
+const MIN_EFFECTIVE_WEIGHT: i32 = -1000;
+const MAX_EFFECTIVE_WEIGHT: i32 = 1000;
+const MAX_TAU_REC_STEPS: u16 = 1000;
 
 pub trait BiophysCircuit<I: ?Sized, O> {
     fn step(&mut self, input: &I) -> O;
@@ -15,6 +22,7 @@ pub struct BiophysRuntime {
     pub dt_ms: u16,
     pub step_count: u64,
     pub max_spikes_per_step: usize,
+    pub current_modulators: ModulatorField,
     pub edges: Vec<SynapseEdge>,
     pub stp_params: Vec<StpParams>,
     pub pre_index: Vec<Vec<usize>>,
@@ -80,6 +88,7 @@ impl BiophysRuntime {
             dt_ms,
             step_count: 0,
             max_spikes_per_step,
+            current_modulators: ModulatorField::default(),
             edges,
             stp_params,
             pre_index,
@@ -89,11 +98,19 @@ impl BiophysRuntime {
         }
     }
 
+    pub fn set_modulators(&mut self, mods: ModulatorField) {
+        self.current_modulators = mods;
+    }
+
     pub fn step(&mut self, inputs: &[i32]) -> PopCode {
         assert_eq!(inputs.len(), self.states.len(), "input length mismatch");
+        let mods = self.current_modulators;
         if !self.edges.is_empty() {
             for (edge, params) in self.edges.iter_mut().zip(self.stp_params.iter().copied()) {
-                edge.stp.update_between_spikes(params);
+                edge.weight_effective =
+                    Self::compute_effective_weight(mods, edge.weight_base, edge.mod_channel);
+                let effective_params = Self::modulated_stp_params(mods, edge, params);
+                edge.stp.update_between_spikes(effective_params);
             }
         }
 
@@ -130,8 +147,10 @@ impl BiophysRuntime {
                 for &edge_idx in &self.pre_index[pre_idx] {
                     let edge = &mut self.edges[edge_idx];
                     let params = self.stp_params[edge_idx];
-                    let released = edge.stp.on_spike(params);
-                    let current = (edge.weight as i64 * released as i64 / 1000) as i32;
+                    let effective_params = Self::modulated_stp_params(mods, edge, params);
+                    let released = edge.stp.on_spike(effective_params);
+                    let current =
+                        (edge.weight_effective as i64 * released as i64 / 1000) as i32;
                     let deliver_at_step = self.step_count.saturating_add(edge.delay_steps as u64);
                     let bucket = (deliver_at_step as usize) % self.event_queue.len();
                     if self.event_queue[bucket].len() >= self.max_events_per_step {
@@ -165,11 +184,13 @@ impl BiophysRuntime {
         for (edge, params) in self.edges.iter().zip(self.stp_params.iter()) {
             update_u32(&mut hasher, edge.pre.0);
             update_u32(&mut hasher, edge.post.0);
-            update_i32(&mut hasher, edge.weight);
+            update_i32(&mut hasher, edge.weight_base);
             update_u16(&mut hasher, edge.delay_steps);
+            update_u8(&mut hasher, mod_channel_code(edge.mod_channel));
             update_u16(&mut hasher, params.u);
             update_u16(&mut hasher, params.tau_rec_steps);
             update_u16(&mut hasher, params.tau_fac_steps);
+            update_u8(&mut hasher, mod_channel_code(params.mod_channel.unwrap_or_default()));
         }
         update_u32(&mut hasher, self.max_events_per_step as u32);
         *hasher.finalize().as_bytes()
@@ -189,8 +210,62 @@ impl BiophysRuntime {
             update_u16(&mut hasher, edge.stp.x);
             update_u16(&mut hasher, edge.stp.u);
         }
+        update_u8(&mut hasher, mod_level_code(self.current_modulators.na));
+        update_u8(&mut hasher, mod_level_code(self.current_modulators.da));
+        update_u8(&mut hasher, mod_level_code(self.current_modulators.ht));
         update_u64(&mut hasher, self.dropped_event_count);
         *hasher.finalize().as_bytes()
+    }
+
+    fn compute_effective_weight(
+        mods: ModulatorField,
+        weight_base: i32,
+        channel: ModChannel,
+    ) -> i32 {
+        let mult = match channel {
+            ModChannel::None => 100,
+            ModChannel::Na => level_mul(mods.na),
+            ModChannel::Da => level_mul(mods.da),
+            ModChannel::Ht => level_mul(mods.ht),
+            ModChannel::NaDa => {
+                let na = level_mul(mods.na) as i64;
+                let da = level_mul(mods.da) as i64;
+                ((na * da) / 100) as i32
+            }
+        };
+        let scaled = (weight_base as i64 * mult as i64) / 100;
+        clamp_i32(scaled as i32, MIN_EFFECTIVE_WEIGHT, MAX_EFFECTIVE_WEIGHT)
+    }
+
+    fn modulated_stp_params(
+        mods: ModulatorField,
+        edge: &SynapseEdge,
+        base: StpParams,
+    ) -> StpParams {
+        let channel = base.mod_channel.unwrap_or(edge.mod_channel);
+        match channel {
+            ModChannel::Da | ModChannel::NaDa => {
+                if mods.da == ModLevel::High {
+                    let u = (base.u as i32 + 50).clamp(0, STP_SCALE as i32) as u16;
+                    StpParams { u, ..base }
+                } else {
+                    base
+                }
+            }
+            ModChannel::Ht => {
+                if mods.ht == ModLevel::High {
+                    let tau_rec_steps =
+                        (base.tau_rec_steps as u32 + 5).min(MAX_TAU_REC_STEPS as u32) as u16;
+                    StpParams {
+                        tau_rec_steps,
+                        ..base
+                    }
+                } else {
+                    base
+                }
+            }
+            _ => base,
+        }
     }
 }
 
@@ -218,4 +293,26 @@ fn update_u64(hasher: &mut blake3::Hasher, value: u64) {
 
 fn update_i32(hasher: &mut blake3::Hasher, value: i32) {
     hasher.update(&value.to_le_bytes());
+}
+
+fn update_u8(hasher: &mut blake3::Hasher, value: u8) {
+    hasher.update(&[value]);
+}
+
+fn mod_channel_code(channel: ModChannel) -> u8 {
+    match channel {
+        ModChannel::None => 0,
+        ModChannel::Na => 1,
+        ModChannel::Da => 2,
+        ModChannel::Ht => 3,
+        ModChannel::NaDa => 4,
+    }
+}
+
+fn mod_level_code(level: ModLevel) -> u8 {
+    match level {
+        ModLevel::Low => 0,
+        ModLevel::Med => 1,
+        ModLevel::High => 2,
+    }
 }

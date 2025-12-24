@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use biophys_core::ModulatorField;
 use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet};
 use microcircuit_core::{
     digest_config, digest_meta, CircuitConfig, CircuitStateMeta, MicrocircuitBackend,
@@ -14,6 +15,7 @@ pub struct LcInput {
     pub timeout_count_short: u32,
     pub deny_count_short: u32,
     pub arousal_floor: LevelClass,
+    pub modulators: ModulatorField,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

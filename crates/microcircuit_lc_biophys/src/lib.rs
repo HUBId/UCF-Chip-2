@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use biophys_core::{LifParams, LifState, NeuronId, PopCode, StpParams, StpState, STP_SCALE};
+use biophys_core::{
+    LifParams, LifState, ModChannel, NeuronId, PopCode, StpParams, StpState, STP_SCALE,
+};
 use biophys_runtime::BiophysRuntime;
 use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet};
 use microcircuit_core::{digest_meta, CircuitConfig, MicrocircuitBackend};
@@ -30,12 +32,14 @@ const EXCITATORY_STP: StpParams = StpParams {
     u: 250,
     tau_rec_steps: 5,
     tau_fac_steps: 3,
+    mod_channel: None,
 };
 
 const NO_STP: StpParams = StpParams {
     u: STP_SCALE,
     tau_rec_steps: 0,
     tau_fac_steps: 0,
+    mod_channel: None,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -192,6 +196,7 @@ impl LcMicrocircuit {
 impl MicrocircuitBackend<LcInput, LcOutput> for LcMicrocircuit {
     fn step(&mut self, input: &LcInput, _now_ms: u64) -> LcOutput {
         let currents = Self::build_inputs(input);
+        self.runtime.set_modulators(input.modulators);
         let PopCode { spikes } = self.runtime.step(&currents);
         let spike_count_total = spikes.len();
         let spike_count_exc = spikes
@@ -263,8 +268,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
             edges.push(biophys_core::SynapseEdge {
                 pre: NeuronId(pre as u32),
                 post: NeuronId(post as u32),
-                weight: EXCITATORY_WEIGHT,
+                weight_base: EXCITATORY_WEIGHT,
+                weight_effective: EXCITATORY_WEIGHT,
                 delay_steps,
+                mod_channel: ModChannel::None,
                 stp: StpState {
                     x: STP_SCALE,
                     u: EXCITATORY_STP.u,
@@ -279,8 +286,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
             edges.push(biophys_core::SynapseEdge {
                 pre: NeuronId(pre as u32),
                 post: NeuronId(post as u32),
-                weight: INHIBITORY_WEIGHT,
+                weight_base: INHIBITORY_WEIGHT,
+                weight_effective: INHIBITORY_WEIGHT,
                 delay_steps: 1,
+                mod_channel: ModChannel::None,
                 stp: StpState {
                     x: STP_SCALE,
                     u: NO_STP.u,

@@ -10,3 +10,6 @@ path = "src/lib.rs"
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_pmrf_stub = { path = "../microcircuit_pmrf_stub" }
+
+[dev-dependencies]
+biophys_core = { path = "../biophys_core" }

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use biophys_core::ModulatorField;
 use dbm_core::{
     DbmModule, DwmMode, IntegrityState, LevelClass, ReasonSet, SalienceItem, SalienceSource,
 };
@@ -14,6 +15,7 @@ pub struct SnInput {
     pub current_dwm: Option<dbm_core::DwmMode>,
     pub replay_hint: bool,
     pub reward_block: bool,
+    pub modulators: ModulatorField,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

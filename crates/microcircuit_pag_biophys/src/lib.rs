@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use biophys_core::{LifParams, LifState, NeuronId, PopCode, StpParams, StpState, STP_SCALE};
+use biophys_core::{
+    LifParams, LifState, ModChannel, NeuronId, PopCode, StpParams, StpState, STP_SCALE,
+};
 use biophys_runtime::BiophysRuntime;
 use dbm_core::{DbmModule, IntegrityState, LevelClass, ReasonSet, ThreatVector};
 use microcircuit_core::{digest_meta, CircuitConfig, MicrocircuitBackend};
@@ -44,12 +46,14 @@ const EXCITATORY_STP: StpParams = StpParams {
     u: 250,
     tau_rec_steps: 5,
     tau_fac_steps: 3,
+    mod_channel: None,
 };
 
 const NO_STP: StpParams = StpParams {
     u: STP_SCALE,
     tau_rec_steps: 0,
     tau_fac_steps: 0,
+    mod_channel: None,
 };
 
 #[derive(Debug, Clone)]
@@ -268,6 +272,7 @@ impl MicrocircuitBackend<PagInput, PagOutput> for PagBiophysMicrocircuit {
         Self::apply_pool_currents(&mut currents, DP3_POOL_START, drives.dp3);
         Self::apply_pool_currents(&mut currents, DP4_POOL_START, drives.dp4);
 
+        self.runtime.set_modulators(input.modulators);
         let PopCode { spikes } = self.runtime.step(&currents);
         let mut pool_spikes = [0usize; POOL_COUNT];
         for spike in &spikes {
@@ -358,8 +363,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
                 edges.push(biophys_core::SynapseEdge {
                     pre: NeuronId(pre as u32),
                     post: NeuronId(post as u32),
-                    weight: EXCITATORY_WEIGHT,
+                    weight_base: EXCITATORY_WEIGHT,
+                    weight_effective: EXCITATORY_WEIGHT,
                     delay_steps,
+                    mod_channel: ModChannel::None,
                     stp: StpState {
                         x: STP_SCALE,
                         u: EXCITATORY_STP.u,
@@ -375,8 +382,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
             edges.push(biophys_core::SynapseEdge {
                 pre: NeuronId(pre as u32),
                 post: NeuronId(post as u32),
-                weight: INHIBITORY_WEIGHT,
+                weight_base: INHIBITORY_WEIGHT,
+                weight_effective: INHIBITORY_WEIGHT,
                 delay_steps: 1,
+                mod_channel: ModChannel::None,
                 stp: StpState {
                     x: STP_SCALE,
                     u: NO_STP.u,
@@ -391,8 +400,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
             edges.push(biophys_core::SynapseEdge {
                 pre: NeuronId(pre as u32),
                 post: NeuronId(post as u32),
-                weight: CROSS_INHIBIT_STRONG,
+                weight_base: CROSS_INHIBIT_STRONG,
+                weight_effective: CROSS_INHIBIT_STRONG,
                 delay_steps: 1,
+                mod_channel: ModChannel::None,
                 stp: StpState {
                     x: STP_SCALE,
                     u: NO_STP.u,
@@ -407,8 +418,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
             edges.push(biophys_core::SynapseEdge {
                 pre: NeuronId(pre as u32),
                 post: NeuronId(post as u32),
-                weight: CROSS_INHIBIT_MODERATE,
+                weight_base: CROSS_INHIBIT_MODERATE,
+                weight_effective: CROSS_INHIBIT_MODERATE,
                 delay_steps: 1,
+                mod_channel: ModChannel::None,
                 stp: StpState {
                     x: STP_SCALE,
                     u: NO_STP.u,
@@ -424,6 +437,7 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
     use dbm_core::CooldownClass;
     use microcircuit_pag_stub::PagRules;
 
@@ -435,6 +449,7 @@ mod tests {
             unlock_present: false,
             stability: LevelClass::Low,
             serotonin_cooldown: CooldownClass::Base,
+            modulators: ModulatorField::default(),
         }
     }
 

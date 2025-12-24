@@ -172,6 +172,7 @@ impl MicrocircuitBackend<PmrfInput, PmrfOutput> for PmrfRhythmMicrocircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
     use microcircuit_core::CircuitConfig;
 
     fn base_input() -> PmrfInput {
@@ -181,6 +182,7 @@ mod tests {
             stability: LevelClass::Low,
             hold_active: false,
             budget_stress: LevelClass::Low,
+            modulators: ModulatorField::default(),
         }
     }
 

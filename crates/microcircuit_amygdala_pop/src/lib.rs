@@ -245,6 +245,7 @@ impl MicrocircuitBackend<AmyInput, AmyOutput> for AmygdalaPopMicrocircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
     use dbm_core::IntegrityState;
 
     fn base_input() -> AmyInput {
@@ -263,6 +264,7 @@ mod tests {
             cerebellum_tool_anomaly_present: None,
             tool_anomalies: Vec::new(),
             divergence: LevelClass::Low,
+            modulators: ModulatorField::default(),
         }
     }
 

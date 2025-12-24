@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use biophys_core::ModulatorField;
 use dbm_core::{CooldownClass, DbmModule, IntegrityState, LevelClass, ReasonSet, ThreatVector};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +20,7 @@ pub struct PagInput {
     pub unlock_present: bool,
     pub stability: LevelClass,
     pub serotonin_cooldown: CooldownClass,
+    pub modulators: ModulatorField,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +102,7 @@ impl DbmModule for PagRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
 
     fn base_input() -> PagInput {
         PagInput {
@@ -109,6 +112,7 @@ mod tests {
             unlock_present: false,
             stability: LevelClass::Low,
             serotonin_cooldown: CooldownClass::Base,
+            modulators: ModulatorField::default(),
         }
     }
 

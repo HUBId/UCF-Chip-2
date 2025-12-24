@@ -1,6 +1,7 @@
 use dbm_12_insula::InsulaInput;
 use dbm_18_cerebellum::CerInput;
 use dbm_6_dopamin_nacc::DopaInput;
+use biophys_core::ModulatorField;
 use dbm_7_lc::LcInput;
 use dbm_8_serotonin::SerInput;
 use dbm_9_amygdala::AmyInput;
@@ -48,6 +49,7 @@ fn canonical_brain_input() -> BrainInput {
             timeout_count_short: 2,
             deny_count_short: 3,
             arousal_floor: LevelClass::Med,
+            modulators: ModulatorField::default(),
         },
         serotonin: SerInput {
             stability_floor: LevelClass::Med,
@@ -64,6 +66,7 @@ fn canonical_brain_input() -> BrainInput {
             unlock_present: false,
             stability: LevelClass::Med,
             serotonin_cooldown: CooldownClass::Base,
+            modulators: ModulatorField::default(),
         },
         cerebellum: Some(CerInput {
             timeout_count_medium: 3,
@@ -77,10 +80,12 @@ fn canonical_brain_input() -> BrainInput {
         }),
         stn: StnInput {
             integrity: IntegrityState::Fail,
+            modulators: ModulatorField::default(),
             ..Default::default()
         },
         pmrf: PmrfInput {
             divergence: LevelClass::High,
+            modulators: ModulatorField::default(),
             ..Default::default()
         },
         dopamin: Some(DopaInput {

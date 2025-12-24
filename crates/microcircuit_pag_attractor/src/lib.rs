@@ -288,6 +288,7 @@ impl DbmModule for PagAttractorMicrocircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
     use microcircuit_pag_stub::PagRules;
 
     fn base_input() -> PagInput {
@@ -298,6 +299,7 @@ mod tests {
             unlock_present: false,
             stability: LevelClass::Low,
             serotonin_cooldown: CooldownClass::Base,
+            modulators: ModulatorField::default(),
         }
     }
 

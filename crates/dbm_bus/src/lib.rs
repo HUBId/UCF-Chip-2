@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use baseline_resolver::{resolve_baseline, BaselineInputs, HbvOffsets};
+use biophys_core::{ModLevel, ModulatorField};
 use dbm_0_sn::{SnInput, SubstantiaNigra};
 use dbm_12_insula::{Insula, InsulaInput};
 use dbm_13_hypothalamus::{ControlDecision, Hypothalamus, HypothalamusInput};
@@ -275,6 +276,7 @@ impl BrainBus {
                         .map_or(LevelClass::Low, |c| c.divergence),
                 ),
             ),
+            modulators: ModulatorField::default(),
             ..input.lc
         };
         let lc_output = self.lc.tick(&lc_input);
@@ -285,6 +287,14 @@ impl BrainBus {
         };
         let mut ser_output = self.serotonin.tick(&ser_input);
         ser_output = apply_baseline_cooldown_bias(ser_output, &baseline);
+
+        let last_dopa_output = self.last_dopa_output().unwrap_or_default();
+        let pre_modulators = modulator_field_from_levels(
+            lc_output.arousal,
+            ser_output.stability,
+            last_dopa_output.progress,
+            last_dopa_output.reward_block,
+        );
 
         let amy_input = AmyInput {
             tool_anomaly_present: cerebellum_output
@@ -302,49 +312,10 @@ impl BrainBus {
             divergence: cerebellum_output
                 .as_ref()
                 .map_or(input.amygdala.divergence, |output| output.divergence),
+            modulators: pre_modulators,
             ..input.amygdala
         };
         let amy_output = self.amygdala.tick(&amy_input);
-
-        let pag_input = PagInput {
-            threat: amy_output.threat,
-            vectors: amy_output.vectors.clone(),
-            stability: ser_output.stability,
-            serotonin_cooldown: ser_output.cooldown_class,
-            ..input.pag
-        };
-        let pag_output = self.pag.tick(&pag_input);
-
-        let stn_input = StnInput {
-            threat: amy_output.threat,
-            arousal: lc_output.arousal,
-            tool_side_effects_present: amy_output.vectors.contains(&ThreatVector::ToolSideEffects),
-            cerebellum_divergence: cerebellum_output
-                .as_ref()
-                .map_or(LevelClass::Low, |output| output.divergence),
-            ..input.stn
-        };
-        let stn_output = self.stn.tick(&stn_input);
-
-        let cerebellum_divergence = cerebellum_output
-            .as_ref()
-            .map_or(LevelClass::Low, |output| output.divergence);
-        let tool_side_effects_present = amy_output.vectors.contains(&ThreatVector::ToolSideEffects);
-
-        let pmrf_input = PmrfInput {
-            hold_active: stn_output.hold_active,
-            stability: ser_output.stability,
-            divergence: level_max(
-                level_max(input.pmrf.divergence, cerebellum_divergence),
-                if tool_side_effects_present {
-                    LevelClass::High
-                } else {
-                    LevelClass::Low
-                },
-            ),
-            ..input.pmrf
-        };
-        let pmrf_output = self.pmrf.tick(&pmrf_input);
 
         let dopamin_input = input.dopamin.map(|mut dopa_input| {
             dopa_input.threat = amy_output.threat;
@@ -365,6 +336,56 @@ impl BrainBus {
         if dopamin_input.is_some() {
             self.set_last_dopa_output(Some(dopa_output.clone()));
         }
+
+        let modulators = modulator_field_from_levels(
+            lc_output.arousal,
+            ser_output.stability,
+            dopa_output.progress,
+            dopa_output.reward_block,
+        );
+
+        let pag_input = PagInput {
+            threat: amy_output.threat,
+            vectors: amy_output.vectors.clone(),
+            stability: ser_output.stability,
+            serotonin_cooldown: ser_output.cooldown_class,
+            modulators,
+            ..input.pag
+        };
+        let pag_output = self.pag.tick(&pag_input);
+
+        let stn_input = StnInput {
+            threat: amy_output.threat,
+            arousal: lc_output.arousal,
+            tool_side_effects_present: amy_output.vectors.contains(&ThreatVector::ToolSideEffects),
+            cerebellum_divergence: cerebellum_output
+                .as_ref()
+                .map_or(LevelClass::Low, |output| output.divergence),
+            modulators,
+            ..input.stn
+        };
+        let stn_output = self.stn.tick(&stn_input);
+
+        let cerebellum_divergence = cerebellum_output
+            .as_ref()
+            .map_or(LevelClass::Low, |output| output.divergence);
+        let tool_side_effects_present = amy_output.vectors.contains(&ThreatVector::ToolSideEffects);
+
+        let pmrf_input = PmrfInput {
+            hold_active: stn_output.hold_active,
+            stability: ser_output.stability,
+            divergence: level_max(
+                level_max(input.pmrf.divergence, cerebellum_divergence),
+                if tool_side_effects_present {
+                    LevelClass::High
+                } else {
+                    LevelClass::Low
+                },
+            ),
+            modulators,
+            ..input.pmrf
+        };
+        let pmrf_output = self.pmrf.tick(&pmrf_input);
 
         let mut insula_input = input.insula;
         insula_input.hbv_present = true;
@@ -401,6 +422,7 @@ impl BrainBus {
             current_dwm: Some(self.current_dwm),
             replay_hint: dopa_output.replay_hint,
             reward_block: dopa_output.reward_block,
+            modulators,
         });
 
         let sc_output = self.sc.tick(&ScInput {
@@ -635,6 +657,28 @@ fn cooldown_to_level(class: CooldownClass) -> LevelClass {
     match class {
         CooldownClass::Base => LevelClass::Low,
         CooldownClass::Longer => LevelClass::High,
+    }
+}
+
+pub fn modulator_field_from_levels(
+    na: LevelClass,
+    ht: LevelClass,
+    da: LevelClass,
+    reward_block: bool,
+) -> ModulatorField {
+    let da_level = if reward_block { LevelClass::Low } else { da };
+    ModulatorField {
+        na: mod_level_from_levelclass(na),
+        da: mod_level_from_levelclass(da_level),
+        ht: mod_level_from_levelclass(ht),
+    }
+}
+
+fn mod_level_from_levelclass(level: LevelClass) -> ModLevel {
+    match level {
+        LevelClass::Low => ModLevel::Low,
+        LevelClass::Med => ModLevel::Med,
+        LevelClass::High => ModLevel::High,
     }
 }
 

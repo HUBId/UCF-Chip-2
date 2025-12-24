@@ -7,4 +7,5 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
+biophys_core = { path = "../biophys_core" }
 dbm_core = { path = "../dbm_core" }

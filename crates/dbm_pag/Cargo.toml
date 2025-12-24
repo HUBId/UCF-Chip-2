@@ -22,3 +22,6 @@ microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_pag_attractor = { path = "../microcircuit_pag_attractor", optional = true }
 microcircuit_pag_stub = { path = "../microcircuit_pag_stub" }
 microcircuit_pag_biophys = { path = "../microcircuit_pag_biophys", optional = true }
+
+[dev-dependencies]
+biophys_core = { path = "../biophys_core" }

@@ -14,6 +14,7 @@ biophys-sn = ["dbm_0_sn/biophys-sn"]
 biophys-stn = ["dbm_stn/biophys-stn"]
 
 [dependencies]
+biophys_core = { path = "../biophys_core" }
 dbm_core = { path = "../dbm_core" }
 dbm_hpa = { path = "../dbm_hpa" }
 baseline_resolver = { path = "../baseline_resolver" }

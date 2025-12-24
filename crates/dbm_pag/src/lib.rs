@@ -96,6 +96,7 @@ impl DbmModule for Pag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
     use dbm_core::{CooldownClass, IntegrityState, LevelClass, ThreatVector};
 
     fn base_input() -> PagInput {
@@ -106,6 +107,7 @@ mod tests {
             unlock_present: false,
             stability: LevelClass::Low,
             serotonin_cooldown: CooldownClass::Base,
+            modulators: ModulatorField::default(),
         }
     }
 

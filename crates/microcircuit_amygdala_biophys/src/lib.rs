@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use biophys_core::{
-    clamp_i32, LifParams, LifState, NeuronId, PopCode, StpParams, StpState, STP_SCALE,
+    clamp_i32, LifParams, LifState, ModChannel, NeuronId, PopCode, StpParams, StpState, STP_SCALE,
 };
 use biophys_runtime::BiophysRuntime;
 use dbm_core::{IntegrityState, LevelClass, ReasonSet, ThreatVector};
@@ -43,12 +43,14 @@ const STP_EXCITATORY: StpParams = StpParams {
     u: 350,
     tau_rec_steps: 5,
     tau_fac_steps: 3,
+    mod_channel: None,
 };
 
 const STP_NONE: StpParams = StpParams {
     u: STP_SCALE,
     tau_rec_steps: 0,
     tau_fac_steps: 0,
+    mod_channel: None,
 };
 
 #[derive(Debug, Clone)]
@@ -231,6 +233,7 @@ impl MicrocircuitBackend<AmyInput, AmyOutput> for AmygdalaBiophysMicrocircuit {
     fn step(&mut self, input: &AmyInput, _now_ms: u64) -> AmyOutput {
         self.state.step_count = self.state.step_count.saturating_add(1);
         let currents = Self::build_inputs(input);
+        self.runtime.set_modulators(input.modulators);
         let spikes = self.runtime.step(&currents);
         self.update_pool_accumulators(&spikes);
         self.update_latches();
@@ -295,8 +298,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
                 edges.push(biophys_core::SynapseEdge {
                     pre: NeuronId(pre as u32),
                     post: NeuronId(post as u32),
-                    weight: EXCITATORY_WEIGHT,
+                    weight_base: EXCITATORY_WEIGHT,
+                    weight_effective: EXCITATORY_WEIGHT,
                     delay_steps: 1,
+                    mod_channel: ModChannel::None,
                     stp: StpState {
                         x: STP_SCALE,
                         u: STP_EXCITATORY.u,
@@ -314,8 +319,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
             edges.push(biophys_core::SynapseEdge {
                 pre: NeuronId(pre as u32),
                 post: NeuronId(post as u32),
-                weight: CROSS_EXCITATORY_WEIGHT,
+                weight_base: CROSS_EXCITATORY_WEIGHT,
+                weight_effective: CROSS_EXCITATORY_WEIGHT,
                 delay_steps: 1,
+                mod_channel: ModChannel::None,
                 stp: StpState {
                     x: STP_SCALE,
                     u: STP_EXCITATORY.u,
@@ -329,8 +336,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
             edges.push(biophys_core::SynapseEdge {
                 pre: NeuronId(pre as u32),
                 post: NeuronId(post as u32),
-                weight: CROSS_EXCITATORY_WEIGHT,
+                weight_base: CROSS_EXCITATORY_WEIGHT,
+                weight_effective: CROSS_EXCITATORY_WEIGHT,
                 delay_steps: 1,
+                mod_channel: ModChannel::None,
                 stp: StpState {
                     x: STP_SCALE,
                     u: STP_EXCITATORY.u,
@@ -345,8 +354,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
             edges.push(biophys_core::SynapseEdge {
                 pre: NeuronId(pre as u32),
                 post: NeuronId(inhibitory as u32),
-                weight: EXC_TO_INHIB_WEIGHT,
+                weight_base: EXC_TO_INHIB_WEIGHT,
+                weight_effective: EXC_TO_INHIB_WEIGHT,
                 delay_steps: 1,
+                mod_channel: ModChannel::None,
                 stp: StpState {
                     x: STP_SCALE,
                     u: STP_NONE.u,
@@ -361,8 +372,10 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
             edges.push(biophys_core::SynapseEdge {
                 pre: NeuronId(inhibitory as u32),
                 post: NeuronId(post as u32),
-                weight: INHIBIT_WEIGHT,
+                weight_base: INHIBIT_WEIGHT,
+                weight_effective: INHIBIT_WEIGHT,
                 delay_steps: 1,
+                mod_channel: ModChannel::None,
                 stp: StpState {
                     x: STP_SCALE,
                     u: STP_NONE.u,
@@ -378,6 +391,7 @@ fn build_edges() -> (Vec<biophys_core::SynapseEdge>, Vec<StpParams>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
     use dbm_core::ThreatVector;
 
     fn base_input() -> AmyInput {
@@ -396,6 +410,7 @@ mod tests {
             cerebellum_tool_anomaly_present: None,
             tool_anomalies: Vec::new(),
             divergence: LevelClass::Low,
+            modulators: ModulatorField::default(),
         }
     }
 
