@@ -82,10 +82,7 @@ impl AssetStore {
     }
 
     pub fn latest(&self) -> Option<AssetManifestEvidence> {
-        self.manifests
-            .iter()
-            .copied()
-            .max_by(|a, b| compare_manifest(a, b))
+        self.manifests.iter().copied().max_by(compare_manifest)
     }
 
     pub fn get(&self, manifest_digest: [u8; 32]) -> Option<AssetManifestEvidence> {
