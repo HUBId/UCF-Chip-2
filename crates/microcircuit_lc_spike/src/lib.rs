@@ -208,6 +208,7 @@ impl DbmModule for LcMicrocircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biophys_core::ModulatorField;
 
     fn base_input() -> LcInput {
         LcInput {
@@ -271,6 +272,7 @@ mod tests {
                 deny_count_short: 2,
                 receipt_missing_count_short: 1,
                 arousal_floor: LevelClass::High,
+                modulators: ModulatorField::default(),
             },
             0,
         );
@@ -294,6 +296,7 @@ mod tests {
             deny_count_short: 2,
             receipt_missing_count_short: 1,
             arousal_floor: LevelClass::High,
+            modulators: ModulatorField::default(),
         };
 
         circuit.step(&input, 0);
