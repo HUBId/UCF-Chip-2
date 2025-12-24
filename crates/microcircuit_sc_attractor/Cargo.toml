@@ -1,16 +1,12 @@
 [package]
-name = "dbm_sc"
+name = "microcircuit_sc_attractor"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
 path = "src/lib.rs"
 
-[features]
-microcircuit-sc-attractor = ["microcircuit_sc_attractor"]
-
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
-microcircuit_sc_attractor = { path = "../microcircuit_sc_attractor", optional = true }
 microcircuit_sc_stub = { path = "../microcircuit_sc_stub" }

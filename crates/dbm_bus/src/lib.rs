@@ -394,6 +394,8 @@ impl BrainBus {
             unlock_present: input.sc_unlock_present,
             replay_planned_present: input.sc_replay_planned_present,
             integrity: isv.integrity,
+            dlp_critical_present: input.hpa.dlp_critical_present,
+            replay_mismatch_present: input.hpa.replay_mismatch_present,
         });
 
         let isv_snapshot = isv.clone();
