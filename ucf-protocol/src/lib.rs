@@ -87,6 +87,7 @@ pub mod v1 {
         RcGvToolSuspendRecommended = 57,
         RcGvProgressRewardBlocked = 58,
         RcGvReplayDiminishingReturns = 59,
+        RcGvAssetManifestAppended = 60,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]

@@ -62,6 +62,10 @@ members = [
     "crates/biophys_assets",
     "crates/biophys_solver",
     "crates/biophys_runtime",
+    "crates/assets",
+    "crates/pvgs",
+    "crates/query",
+    "crates/scorecards",
 ]
 resolver = "2"
 

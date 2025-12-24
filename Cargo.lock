@@ -33,6 +33,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "assets"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "baseline_resolver"
 version = "0.1.0"
 dependencies = [
@@ -749,6 +756,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pvgs"
+version = "0.1.0"
+dependencies = [
+ "assets",
+ "blake3",
+ "thiserror",
+ "ucf-protocol",
+]
+
+[[package]]
 name = "pvgs_client"
 version = "0.1.0"
 dependencies = [
@@ -756,6 +773,14 @@ dependencies = [
  "serde",
  "thiserror",
  "ucf-protocol",
+]
+
+[[package]]
+name = "query"
+version = "0.1.0"
+dependencies = [
+ "assets",
+ "pvgs",
 ]
 
 [[package]]
@@ -781,6 +806,16 @@ name = "ryu"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
+
+[[package]]
+name = "scorecards"
+version = "0.1.0"
+dependencies = [
+ "assets",
+ "hex",
+ "pvgs",
+ "query",
+]
 
 [[package]]
 name = "serde"
