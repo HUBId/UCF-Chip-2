@@ -241,6 +241,7 @@ dependencies = [
  "dbm_core",
  "microcircuit_core",
  "microcircuit_pag_attractor",
+ "microcircuit_pag_biophys",
  "microcircuit_pag_stub",
 ]
 
@@ -540,6 +541,17 @@ dependencies = [
 name = "microcircuit_pag_attractor"
 version = "0.1.0"
 dependencies = [
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_pag_stub",
+]
+
+[[package]]
+name = "microcircuit_pag_biophys"
+version = "0.1.0"
+dependencies = [
+ "biophys_core",
+ "biophys_runtime",
  "dbm_core",
  "microcircuit_core",
  "microcircuit_pag_stub",
