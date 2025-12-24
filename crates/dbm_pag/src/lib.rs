@@ -44,10 +44,22 @@ impl Pag {
 
     #[cfg(feature = "microcircuit-pag-attractor")]
     pub fn new_micro(config: CircuitConfig) -> Self {
-        use microcircuit_pag_attractor::PagAttractorMicrocircuit;
+        #[cfg(feature = "biophys-pag")]
+        {
+            use microcircuit_pag_biophys::PagBiophysMicrocircuit;
 
-        Self {
-            backend: PagBackend::Micro(Box::new(PagAttractorMicrocircuit::new(config))),
+            return Self {
+                backend: PagBackend::Micro(Box::new(PagBiophysMicrocircuit::new(config))),
+            };
+        }
+
+        #[cfg(not(feature = "biophys-pag"))]
+        {
+            use microcircuit_pag_attractor::PagAttractorMicrocircuit;
+
+            Self {
+                backend: PagBackend::Micro(Box::new(PagAttractorMicrocircuit::new(config))),
+            }
         }
     }
 
