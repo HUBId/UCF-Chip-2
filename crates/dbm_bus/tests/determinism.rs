@@ -133,15 +133,28 @@ fn tick_outputs_stable_and_reason_codes_sorted() {
         .all(|pair| pair[0] <= pair[1]));
     assert!(output_a.reason_codes.len() <= ReasonSet::DEFAULT_MAX_LEN);
 
-    let expected = vec![
-        "RC.GV.DIVERGENCE.HIGH".to_string(),
-        "RC.GV.DWM.REPORT".to_string(),
-        "RC.GV.FOCUS_SHIFT.EXECUTED".to_string(),
-        "RC.GV.HOLD.ON".to_string(),
-        "RC.GV.ORIENT.TARGET_INTEGRITY".to_string(),
-        "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
-        "RC.GV.SEQUENCE.SPLIT_REQUIRED".to_string(),
-        "RC.RG.STATE.AROUSAL_UP".to_string(),
-    ];
+    let expected = if cfg!(feature = "biophys-stn") {
+        vec![
+            "RC.GV.DIVERGENCE.HIGH".to_string(),
+            "RC.GV.DWM.REPORT".to_string(),
+            "RC.GV.FOCUS_SHIFT.EXECUTED".to_string(),
+            "RC.GV.HOLD.ON".to_string(),
+            "RC.GV.ORIENT.TARGET_INTEGRITY".to_string(),
+            "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
+            "RC.GV.SEQUENCE.SPLIT_REQUIRED".to_string(),
+            "RC.RE.INTEGRITY.FAIL".to_string(),
+        ]
+    } else {
+        vec![
+            "RC.GV.DIVERGENCE.HIGH".to_string(),
+            "RC.GV.DWM.REPORT".to_string(),
+            "RC.GV.FOCUS_SHIFT.EXECUTED".to_string(),
+            "RC.GV.HOLD.ON".to_string(),
+            "RC.GV.ORIENT.TARGET_INTEGRITY".to_string(),
+            "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
+            "RC.GV.SEQUENCE.SPLIT_REQUIRED".to_string(),
+            "RC.RG.STATE.AROUSAL_UP".to_string(),
+        ]
+    };
     assert_eq!(output_a.reason_codes, expected);
 }

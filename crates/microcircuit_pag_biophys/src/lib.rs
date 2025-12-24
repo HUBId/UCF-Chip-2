@@ -170,8 +170,8 @@ impl PagBiophysMicrocircuit {
     }
 
     fn apply_pool_currents(currents: &mut [i32; NEURON_COUNT], start: usize, drive: i32) {
-        for idx in start..start + POOL_SIZE {
-            currents[idx] = currents[idx].saturating_add(drive);
+        for value in currents.iter_mut().skip(start).take(POOL_SIZE) {
+            *value = value.saturating_add(drive);
         }
     }
 
