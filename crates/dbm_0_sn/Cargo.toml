@@ -9,9 +9,17 @@ path = "src/lib.rs"
 [features]
 microcircuit-sn = []
 microcircuit-sn-attractor = ["microcircuit-sn", "microcircuit_sn_attractor"]
+biophys = []
+biophys-sn = [
+    "microcircuit-sn",
+    "dep:microcircuit_sn_biophys",
+    "microcircuit_sn_biophys/biophys",
+    "biophys",
+]
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_sn_attractor = { path = "../microcircuit_sn_attractor", optional = true }
 microcircuit_sn_stub = { path = "../microcircuit_sn_stub" }
+microcircuit_sn_biophys = { path = "../microcircuit_sn_biophys", optional = true }

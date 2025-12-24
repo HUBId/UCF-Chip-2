@@ -219,7 +219,16 @@ impl SubstantiaNigra {
 
     #[cfg(feature = "microcircuit-sn")]
     pub fn new_micro(config: CircuitConfig) -> Self {
-        #[cfg(feature = "microcircuit-sn-attractor")]
+        #[cfg(feature = "biophys-sn")]
+        {
+            use microcircuit_sn_biophys::SnBiophysMicrocircuit;
+
+            return Self {
+                backend: SnBackend::Micro(Box::new(SnBiophysMicrocircuit::new(config))),
+            };
+        }
+
+        #[cfg(all(feature = "microcircuit-sn-attractor", not(feature = "biophys-sn")))]
         {
             use microcircuit_sn_attractor::SnAttractorMicrocircuit;
 
@@ -228,7 +237,10 @@ impl SubstantiaNigra {
             };
         }
 
-        #[cfg(not(feature = "microcircuit-sn-attractor"))]
+        #[cfg(all(
+            not(feature = "microcircuit-sn-attractor"),
+            not(feature = "biophys-sn")
+        ))]
         {
             use microcircuit_sn_stub::SnMicrocircuit;
 
@@ -432,7 +444,8 @@ mod tests {
 
     #[cfg(all(
         feature = "microcircuit-sn",
-        not(feature = "microcircuit-sn-attractor")
+        not(feature = "microcircuit-sn-attractor"),
+        not(feature = "biophys-sn")
     ))]
     #[test]
     fn micro_backend_matches_rules() {
