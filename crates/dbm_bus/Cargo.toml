@@ -6,6 +6,8 @@ edition = "2021"
 [features]
 microcircuit-lc = ["dbm_7_lc/microcircuit-lc"]
 microcircuit-lc-spike = ["dbm_7_lc/microcircuit-lc-spike"]
+biophys = ["dbm_7_lc/biophys"]
+biophys-lc = ["dbm_7_lc/biophys-lc"]
 microcircuit-sn = ["dbm_0_sn/microcircuit-sn"]
 microcircuit-sn-attractor = ["dbm_0_sn/microcircuit-sn-attractor"]
 

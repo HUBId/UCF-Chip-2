@@ -166,6 +166,7 @@ version = "0.1.0"
 dependencies = [
  "dbm_core",
  "microcircuit_core",
+ "microcircuit_lc_biophys",
  "microcircuit_lc_spike",
  "microcircuit_lc_stub",
 ]
@@ -492,6 +493,17 @@ version = "0.1.0"
 dependencies = [
  "dbm_core",
  "microcircuit_pag_stub",
+]
+
+[[package]]
+name = "microcircuit_lc_biophys"
+version = "0.1.0"
+dependencies = [
+ "biophys_core",
+ "biophys_runtime",
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_lc_stub",
 ]
 
 [[package]]

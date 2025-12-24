@@ -34,6 +34,7 @@ members = [
     "crates/microcircuit_sn_attractor",
     "crates/microcircuit_lc_stub",
     "crates/microcircuit_lc_spike",
+    "crates/microcircuit_lc_biophys",
     "crates/microcircuit_dopamin_stub",
     "crates/microcircuit_dopamin_attractor",
     "crates/microcircuit_serotonin_stub",

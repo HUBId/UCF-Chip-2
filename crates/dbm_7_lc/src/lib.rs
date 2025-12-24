@@ -94,7 +94,7 @@ impl Lc {
         }
     }
 
-    #[cfg(feature = "microcircuit-lc-spike")]
+    #[cfg(all(feature = "microcircuit-lc-spike", not(feature = "biophys-lc")))]
     pub fn new_micro(config: CircuitConfig) -> Self {
         use microcircuit_lc_spike::LcMicrocircuit;
 
@@ -103,7 +103,20 @@ impl Lc {
         }
     }
 
-    #[cfg(all(feature = "microcircuit-lc", not(feature = "microcircuit-lc-spike")))]
+    #[cfg(feature = "biophys-lc")]
+    pub fn new_micro(config: CircuitConfig) -> Self {
+        use microcircuit_lc_biophys::LcMicrocircuit;
+
+        Self {
+            backend: LcBackend::Micro(Box::new(LcMicrocircuit::new(config))),
+        }
+    }
+
+    #[cfg(all(
+        feature = "microcircuit-lc",
+        not(feature = "biophys-lc"),
+        not(feature = "microcircuit-lc-spike")
+    ))]
     pub fn new_micro(config: CircuitConfig) -> Self {
         use microcircuit_lc_stub::LcMicrocircuit;
 
@@ -264,6 +277,90 @@ mod tests {
     #[cfg(feature = "microcircuit-lc-spike")]
     #[test]
     fn micro_is_no_less_conservative_than_rules_for_critical_inputs() {
+        fn severity(level: LevelClass) -> u8 {
+            match level {
+                LevelClass::Low => 0,
+                LevelClass::Med => 1,
+                LevelClass::High => 2,
+            }
+        }
+
+        let mut rules = Lc::new();
+        let mut micro = Lc::new_micro(CircuitConfig::default());
+
+        let cases = [
+            LcInput {
+                integrity: IntegrityState::Degraded,
+                arousal_floor: LevelClass::Low,
+                ..Default::default()
+            },
+            LcInput {
+                receipt_invalid_count_short: 2,
+                arousal_floor: LevelClass::Low,
+                ..Default::default()
+            },
+            LcInput {
+                dlp_critical_present_short: true,
+                arousal_floor: LevelClass::Med,
+                ..Default::default()
+            },
+            LcInput {
+                timeout_count_short: 2,
+                arousal_floor: LevelClass::Low,
+                ..Default::default()
+            },
+            LcInput {
+                deny_count_short: 2,
+                receipt_missing_count_short: 1,
+                arousal_floor: LevelClass::Low,
+                ..Default::default()
+            },
+        ];
+
+        for input in cases {
+            let rules_out = rules.tick(&input);
+            let micro_out = micro.tick(&input);
+
+            assert!(
+                severity(micro_out.arousal) >= severity(rules_out.arousal),
+                "micro arousal {:?} was less than rules {:?}",
+                micro_out.arousal,
+                rules_out.arousal
+            );
+            if rules_out.hint_simulate_first {
+                assert!(micro_out.hint_simulate_first);
+            }
+        }
+    }
+
+    #[cfg(feature = "biophys-lc")]
+    #[test]
+    fn receipt_invalid_invariant_holds_for_biophys() {
+        let mut lc = Lc::new_micro(CircuitConfig::default());
+        let output = lc.tick(&LcInput {
+            receipt_invalid_count_short: 1,
+            ..base_input()
+        });
+
+        assert!(matches!(output.arousal, LevelClass::Med | LevelClass::High));
+        assert!(output.hint_simulate_first);
+    }
+
+    #[cfg(feature = "biophys-lc")]
+    #[test]
+    fn integrity_fail_forces_high_for_biophys() {
+        let mut lc = Lc::new_micro(CircuitConfig::default());
+        let output = lc.tick(&LcInput {
+            integrity: IntegrityState::Fail,
+            ..base_input()
+        });
+
+        assert_eq!(output.arousal, LevelClass::High);
+    }
+
+    #[cfg(feature = "biophys-lc")]
+    #[test]
+    fn biophys_is_no_less_conservative_than_rules_for_critical_inputs() {
         fn severity(level: LevelClass) -> u8 {
             match level {
                 LevelClass::Low => 0,

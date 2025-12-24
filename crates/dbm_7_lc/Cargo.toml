@@ -9,9 +9,12 @@ path = "src/lib.rs"
 [features]
 microcircuit-lc = []
 microcircuit-lc-spike = ["microcircuit-lc"]
+biophys = []
+biophys-lc = ["microcircuit-lc", "dep:microcircuit_lc_biophys", "microcircuit_lc_biophys/biophys", "biophys"]
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_lc_stub = { path = "../microcircuit_lc_stub" }
 microcircuit_lc_spike = { path = "../microcircuit_lc_spike" }
+microcircuit_lc_biophys = { path = "../microcircuit_lc_biophys", optional = true }
