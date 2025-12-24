@@ -8,9 +8,11 @@ path = "src/lib.rs"
 
 [features]
 microcircuit-stn-hold = ["dep:microcircuit_stn_hold"]
+biophys-stn = ["dep:microcircuit_stn_biophys"]
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_stn_stub = { path = "../microcircuit_stn_stub" }
 microcircuit_stn_hold = { path = "../microcircuit_stn_hold", optional = true }
+microcircuit_stn_biophys = { path = "../microcircuit_stn_biophys", optional = true }

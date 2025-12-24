@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use dbm_core::DbmModule;
-#[cfg(feature = "microcircuit-stn-hold")]
+#[cfg(any(feature = "biophys-stn", feature = "microcircuit-stn-hold"))]
 use microcircuit_core::CircuitConfig;
 use microcircuit_core::MicrocircuitBackend;
 pub use microcircuit_stn_stub::{StnInput, StnOutput, StnRules};
@@ -36,6 +36,32 @@ pub struct Stn {
 }
 
 impl Stn {
+    #[cfg(feature = "biophys-stn")]
+    pub fn new() -> Self {
+        use microcircuit_stn_biophys::StnBiophysMicrocircuit;
+
+        Self {
+            backend: StnBackend::Micro(Box::new(StnBiophysMicrocircuit::new(
+                CircuitConfig::default(),
+            ))),
+        }
+    }
+
+    #[cfg(all(not(feature = "biophys-stn"), feature = "microcircuit-stn-hold"))]
+    pub fn new() -> Self {
+        use microcircuit_stn_hold::StnHoldMicrocircuit;
+
+        Self {
+            backend: StnBackend::Micro(Box::new(StnHoldMicrocircuit::new(
+                CircuitConfig::default(),
+            ))),
+        }
+    }
+
+    #[cfg(all(
+        not(feature = "biophys-stn"),
+        not(feature = "microcircuit-stn-hold")
+    ))]
     pub fn new() -> Self {
         Self {
             backend: StnBackend::Rules(StnRules::new()),
@@ -48,6 +74,15 @@ impl Stn {
 
         Self {
             backend: StnBackend::Micro(Box::new(StnHoldMicrocircuit::new(config))),
+        }
+    }
+
+    #[cfg(feature = "biophys-stn")]
+    pub fn new_biophys(config: CircuitConfig) -> Self {
+        use microcircuit_stn_biophys::StnBiophysMicrocircuit;
+
+        Self {
+            backend: StnBackend::Micro(Box::new(StnBiophysMicrocircuit::new(config))),
         }
     }
 
@@ -115,6 +150,7 @@ mod tests {
             .contains(&"RC.GV.HOLD.ON".to_string()));
     }
 
+    #[cfg(not(feature = "biophys-stn"))]
     #[test]
     fn policy_pressure_high_triggers_hold_and_novelty_lock() {
         let mut stn = Stn::new();
@@ -128,6 +164,7 @@ mod tests {
         assert!(output.hint_simulate_first);
     }
 
+    #[cfg(not(feature = "biophys-stn"))]
     #[test]
     fn arousal_and_threat_trigger_hold_without_receipt_invalid() {
         let mut stn = Stn::new();
@@ -140,6 +177,7 @@ mod tests {
         assert!(output.hold_active);
     }
 
+    #[cfg(not(feature = "biophys-stn"))]
     #[test]
     fn tool_side_effects_hold_with_policy_pressure() {
         let mut stn = Stn::new();
@@ -161,6 +199,52 @@ mod tests {
         fn assert_micro_superset(input: StnInput) {
             let mut rules = StnRules::new();
             let mut micro = Stn::new_micro(CircuitConfig::default());
+
+            let rules_output = rules.tick(&input);
+            let micro_output = micro.tick(&input);
+
+            assert!(micro_output.hold_active);
+            if rules_output.hint_simulate_first {
+                assert!(micro_output.hint_simulate_first);
+            }
+            if rules_output.hint_export_lock {
+                assert!(micro_output.hint_export_lock);
+            }
+        }
+
+        #[test]
+        fn receipt_invalid_forces_hold_active() {
+            assert_micro_superset(StnInput {
+                receipt_invalid_present: true,
+                ..base_input()
+            });
+        }
+
+        #[test]
+        fn integrity_block_forces_hold_active() {
+            assert_micro_superset(StnInput {
+                integrity: IntegrityState::Fail,
+                ..base_input()
+            });
+        }
+
+        #[test]
+        fn dlp_critical_forces_hold_active() {
+            assert_micro_superset(StnInput {
+                dlp_critical_present: true,
+                ..base_input()
+            });
+        }
+    }
+
+    #[cfg(feature = "biophys-stn")]
+    mod biophys_invariants {
+        use super::*;
+        use microcircuit_core::CircuitConfig;
+
+        fn assert_micro_superset(input: StnInput) {
+            let mut rules = StnRules::new();
+            let mut micro = Stn::new_biophys(CircuitConfig::default());
 
             let rules_output = rules.tick(&input);
             let micro_output = micro.tick(&input);
