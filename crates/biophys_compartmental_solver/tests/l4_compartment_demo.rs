@@ -35,7 +35,10 @@ fn build_solver() -> (L4Solver, L4State) {
         compartments,
     };
 
-    let leak = Leak { g: 0.1, e_rev: -65.0 };
+    let leak = Leak {
+        g: 0.1,
+        e_rev: -65.0,
+    };
     let nak = NaK {
         g_na: 120.0,
         g_k: 36.0,
@@ -52,8 +55,8 @@ fn build_solver() -> (L4Solver, L4State) {
         CompartmentChannels { leak, nak: None },
     ];
 
-    let solver = L4Solver::new(morphology, channels, 0.1, -120.0, 60.0)
-        .expect("solver should initialize");
+    let solver =
+        L4Solver::new(morphology, channels, 0.1, -120.0, 60.0).expect("solver should initialize");
     let state = L4State::new(-65.0, 3);
     (solver, state)
 }

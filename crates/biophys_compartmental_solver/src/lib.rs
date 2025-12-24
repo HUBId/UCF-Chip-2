@@ -43,9 +43,15 @@ pub struct L4Solver {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolverError {
     Morphology(MorphologyError),
-    ChannelCountMismatch { expected: usize, got: usize },
+    ChannelCountMismatch {
+        expected: usize,
+        got: usize,
+    },
     DuplicateCompartmentId(CompartmentId),
-    MissingParent { child: CompartmentId, parent: CompartmentId },
+    MissingParent {
+        child: CompartmentId,
+        parent: CompartmentId,
+    },
 }
 
 impl L4Solver {
@@ -103,12 +109,15 @@ impl L4Solver {
         let mut parent_indices = Vec::with_capacity(morphology.compartments.len());
         for compartment in &morphology.compartments {
             let parent_index = match compartment.parent {
-                Some(parent_id) => id_to_index.get(&parent_id).copied().ok_or(
-                    SolverError::MissingParent {
-                        child: compartment.id,
-                        parent: parent_id,
-                    },
-                )?,
+                Some(parent_id) => {
+                    id_to_index
+                        .get(&parent_id)
+                        .copied()
+                        .ok_or(SolverError::MissingParent {
+                            child: compartment.id,
+                            parent: parent_id,
+                        })?
+                }
                 None => None,
             };
             parent_indices.push(parent_index);
@@ -193,10 +202,7 @@ impl L4Solver {
             .zip(self.channels.iter())
         {
             update_u32(&mut hasher, compartment.id.0);
-            update_u32(
-                &mut hasher,
-                compartment.parent.map_or(u32::MAX, |id| id.0),
-            );
+            update_u32(&mut hasher, compartment.parent.map_or(u32::MAX, |id| id.0));
             update_u8(&mut hasher, compartment_kind_code(compartment.kind));
             update_f32(&mut hasher, compartment.capacitance);
             update_f32(&mut hasher, compartment.axial_resistance);
