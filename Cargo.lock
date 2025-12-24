@@ -251,6 +251,7 @@ version = "0.1.0"
 dependencies = [
  "dbm_core",
  "microcircuit_core",
+ "microcircuit_pmrf_biophys",
  "microcircuit_pmrf_rhythm",
  "microcircuit_pmrf_stub",
 ]
@@ -563,6 +564,17 @@ name = "microcircuit_pag_stub"
 version = "0.1.0"
 dependencies = [
  "dbm_core",
+]
+
+[[package]]
+name = "microcircuit_pmrf_biophys"
+version = "0.1.0"
+dependencies = [
+ "biophys_core",
+ "biophys_runtime",
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_pmrf_stub",
 ]
 
 [[package]]

@@ -53,6 +53,7 @@ members = [
     "crates/microcircuit_stn_biophys",
     "crates/microcircuit_pmrf_stub",
     "crates/microcircuit_pmrf_rhythm",
+    "crates/microcircuit_pmrf_biophys",
     "crates/microcircuit_sc_stub",
     "crates/microcircuit_sc_attractor",
     "crates/microcircuit_insula_stub",

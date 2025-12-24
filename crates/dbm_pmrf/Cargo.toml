@@ -8,9 +8,17 @@ path = "src/lib.rs"
 
 [features]
 microcircuit-pmrf-rhythm = ["dep:microcircuit_pmrf_rhythm"]
+biophys = []
+biophys-pmrf = [
+    "microcircuit-pmrf-rhythm",
+    "dep:microcircuit_pmrf_biophys",
+    "microcircuit_pmrf_biophys/biophys",
+    "biophys",
+]
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_pmrf_stub = { path = "../microcircuit_pmrf_stub" }
 microcircuit_pmrf_rhythm = { path = "../microcircuit_pmrf_rhythm", optional = true }
+microcircuit_pmrf_biophys = { path = "../microcircuit_pmrf_biophys", optional = true }

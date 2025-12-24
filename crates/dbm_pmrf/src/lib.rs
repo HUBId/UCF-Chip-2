@@ -44,10 +44,22 @@ impl Pmrf {
 
     #[cfg(feature = "microcircuit-pmrf-rhythm")]
     pub fn new_micro(config: CircuitConfig) -> Self {
-        use microcircuit_pmrf_rhythm::PmrfRhythmMicrocircuit;
+        #[cfg(feature = "biophys-pmrf")]
+        {
+            use microcircuit_pmrf_biophys::PmrfBiophysMicrocircuit;
 
-        Self {
-            backend: PmrfBackend::Micro(Box::new(PmrfRhythmMicrocircuit::new(config))),
+            return Self {
+                backend: PmrfBackend::Micro(Box::new(PmrfBiophysMicrocircuit::new(config))),
+            };
+        }
+
+        #[cfg(not(feature = "biophys-pmrf"))]
+        {
+            use microcircuit_pmrf_rhythm::PmrfRhythmMicrocircuit;
+
+            Self {
+                backend: PmrfBackend::Micro(Box::new(PmrfRhythmMicrocircuit::new(config))),
+            }
         }
     }
 

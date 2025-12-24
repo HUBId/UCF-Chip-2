@@ -1,0 +1,17 @@
+[package]
+name = "microcircuit_pmrf_biophys"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+biophys = ["biophys_runtime/biophys", "biophys_core/biophys"]
+
+[dependencies]
+dbm_core = { path = "../dbm_core" }
+biophys_core = { path = "../biophys_core" }
+biophys_runtime = { path = "../biophys_runtime" }
+microcircuit_core = { path = "../microcircuit_core" }
+microcircuit_pmrf_stub = { path = "../microcircuit_pmrf_stub" }
