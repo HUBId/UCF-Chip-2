@@ -277,7 +277,16 @@ impl SynapseParamsSet {
         let mut bytes = Vec::new();
         push_u32(&mut bytes, self.version);
         let mut params = self.params.clone();
-        params.sort_by_key(|p| (p.syn_type, p.weight_base, p.stp_u, p.tau_rec, p.tau_fac, p.mod_channel));
+        params.sort_by_key(|p| {
+            (
+                p.syn_type,
+                p.weight_base,
+                p.stp_u,
+                p.tau_rec,
+                p.tau_fac,
+                p.mod_channel,
+            )
+        });
         push_u32(&mut bytes, params.len() as u32);
         for param in params {
             push_u8(&mut bytes, param.syn_type as u8);
