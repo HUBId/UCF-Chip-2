@@ -4,7 +4,8 @@ pub mod pvgs {
     use prost::Message;
     use std::sync::{Arc, Mutex};
     use ucf::v1::{
-        CharacterBaselineVector, MicrocircuitConfigAppend, PolicyEcologyVector, PvgsReceipt,
+        AssetManifest, CharacterBaselineVector, MicrocircuitConfigAppend, PolicyEcologyVector,
+        PvgsReceipt,
     };
 
     #[derive(Clone, PartialEq, Message)]
@@ -61,11 +62,22 @@ pub mod pvgs {
         fn commit_microcircuit_config(&self, append: MicrocircuitConfigAppend) -> PvgsReceipt;
     }
 
+    #[derive(Clone, PartialEq, Message)]
+    pub struct AssetManifestAppend {
+        #[prost(message, optional, tag = "1")]
+        pub manifest: Option<AssetManifest>,
+    }
+
+    pub trait AssetManifestCommit: Clone + Send + Sync {
+        fn commit_asset_manifest(&self, append: AssetManifestAppend) -> PvgsReceipt;
+    }
+
     #[derive(Clone, Default)]
     pub struct InMemoryPvgs {
         latest_cbv: Arc<Mutex<Option<Cbv>>>,
         latest_pev: Arc<Mutex<Option<Pev>>>,
         latest_microcircuit_config: Arc<Mutex<Option<MicrocircuitConfigAppend>>>,
+        latest_asset_manifest: Arc<Mutex<Option<AssetManifestAppend>>>,
     }
 
     impl InMemoryPvgs {
@@ -98,6 +110,10 @@ pub mod pvgs {
         pub fn latest_microcircuit_config(&self) -> Option<MicrocircuitConfigAppend> {
             self.latest_microcircuit_config.lock().unwrap().clone()
         }
+
+        pub fn latest_asset_manifest(&self) -> Option<AssetManifestAppend> {
+            self.latest_asset_manifest.lock().unwrap().clone()
+        }
     }
 
     impl CbvQuery for InMemoryPvgs {
@@ -115,6 +131,13 @@ pub mod pvgs {
     impl MicrocircuitConfigCommit for InMemoryPvgs {
         fn commit_microcircuit_config(&self, append: MicrocircuitConfigAppend) -> PvgsReceipt {
             *self.latest_microcircuit_config.lock().unwrap() = Some(append);
+            PvgsReceipt::default()
+        }
+    }
+
+    impl AssetManifestCommit for InMemoryPvgs {
+        fn commit_asset_manifest(&self, append: AssetManifestAppend) -> PvgsReceipt {
+            *self.latest_asset_manifest.lock().unwrap() = Some(append);
             PvgsReceipt::default()
         }
     }

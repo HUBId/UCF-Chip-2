@@ -12,6 +12,7 @@ prost = "0.12"
 ucf = { package = "ucf-protocol", path = "../ucf-protocol" }
 pvgs_client = { path = "../pvgs_client" }
 biophys_core = { path = "../crates/biophys_core" }
+biophys_assets = { path = "../crates/biophys_assets" }
 dbm_core = { path = "../crates/dbm_core" }
 dbm_12_insula = { path = "../crates/dbm_12_insula" }
 dbm_13_hypothalamus = { path = "../crates/dbm_13_hypothalamus" }

@@ -141,6 +141,13 @@ mod tests {
             self.commits.lock().unwrap().push(evidence);
             Ok(ucf::v1::PvgsReceipt::default())
         }
+
+        fn commit_asset_manifest(
+            &mut self,
+            _manifest: ucf::v1::AssetManifest,
+        ) -> Result<ucf::v1::PvgsReceipt, PvgsError> {
+            Ok(ucf::v1::PvgsReceipt::default())
+        }
     }
 
     #[test]

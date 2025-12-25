@@ -107,6 +107,16 @@ pub mod v1 {
         Hpa = 3,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
+    #[repr(i32)]
+    pub enum AssetKind {
+        Unknown = 0,
+        Morphology = 1,
+        ChannelParams = 2,
+        SynapseParams = 3,
+        Connectivity = 4,
+    }
+
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
     pub struct TraitUpdate {
         #[prost(string, tag = "1")]
@@ -181,6 +191,32 @@ pub mod v1 {
     pub struct MicrocircuitConfigAppend {
         #[prost(message, optional, tag = "1")]
         pub evidence: Option<MicrocircuitConfigEvidence>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct AssetDigest {
+        #[prost(enumeration = "AssetKind", tag = "1")]
+        pub kind: i32,
+        #[prost(uint32, tag = "2")]
+        pub version: u32,
+        #[prost(bytes, tag = "3")]
+        pub digest: ::prost::alloc::vec::Vec<u8>,
+        #[prost(uint64, tag = "4")]
+        pub created_at_ms: u64,
+        #[prost(bytes, optional, tag = "5")]
+        pub prev_digest: Option<::prost::alloc::vec::Vec<u8>>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct AssetManifest {
+        #[prost(uint32, tag = "1")]
+        pub manifest_version: u32,
+        #[prost(uint64, tag = "2")]
+        pub created_at_ms: u64,
+        #[prost(bytes, tag = "3")]
+        pub manifest_digest: ::prost::alloc::vec::Vec<u8>,
+        #[prost(message, repeated, tag = "4")]
+        pub components: ::prost::alloc::vec::Vec<AssetDigest>,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]

@@ -19,8 +19,10 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 use ucf::v1::{ControlFrame, IntegrityStateClass, LevelClass, ReasonCode, ToolClassMask};
 
+mod asset_publisher;
 mod microcircuit_publisher;
 mod proto_bridge;
+use asset_publisher::{build_biophys_components, AssetPublisherState, DEFAULT_ASSET_NEURONS};
 use microcircuit_publisher::{MicrocircuitDigests, MicrocircuitPublisherState};
 use proto_bridge::{
     brain_input_from_signal_frame, control_frame_from_brain_output, BaselineContext,
@@ -78,6 +80,7 @@ pub struct RegulationEngine {
     counters: WindowCounters,
     brain_bus: BrainBus,
     microcircuit_publisher: MicrocircuitPublisherState,
+    asset_publisher: AssetPublisherState,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,6 +122,7 @@ impl Default for RegulationEngine {
                     counters: WindowCounters::default(),
                     brain_bus: BrainBus::with_hpa(hpa, last_hpa_output),
                     microcircuit_publisher: MicrocircuitPublisherState::default(),
+                    asset_publisher: AssetPublisherState::default(),
                 }
             }
             Err(_) => {
@@ -134,6 +138,7 @@ impl Default for RegulationEngine {
                     counters: WindowCounters::default(),
                     brain_bus: BrainBus::with_hpa(hpa, last_hpa_output),
                     microcircuit_publisher: MicrocircuitPublisherState::default(),
+                    asset_publisher: AssetPublisherState::default(),
                 }
             }
         }
@@ -155,6 +160,7 @@ impl RegulationEngine {
             counters: WindowCounters::default(),
             brain_bus: BrainBus::with_hpa(hpa, last_hpa_output),
             microcircuit_publisher: MicrocircuitPublisherState::default(),
+            asset_publisher: AssetPublisherState::default(),
         }
     }
 
@@ -378,6 +384,7 @@ impl RegulationEngine {
         brain_output: &dbm_bus::BrainOutput,
         now_ms: u64,
     ) -> ControlFrame {
+        self.publish_asset_manifest(now_ms);
         self.publish_microcircuit_configs(now_ms);
         let decision = self.apply_forensic_override(decision);
         let decision = self.apply_anti_flapping(decision, now_ms);
@@ -388,6 +395,15 @@ impl RegulationEngine {
         let digests = MicrocircuitDigests::from_brain_bus(&self.brain_bus);
         self.microcircuit_publisher
             .maybe_publish(now_ms, digests, self.pvgs_writer.as_deref_mut());
+    }
+
+    fn publish_asset_manifest(&mut self, now_ms: u64) {
+        let created_at_ms = self.asset_publisher.fixed_created_at_ms(now_ms);
+        let components = build_biophys_components(created_at_ms, DEFAULT_ASSET_NEURONS);
+        let digest =
+            self.asset_publisher
+                .maybe_publish(now_ms, components, self.pvgs_writer.as_deref_mut());
+        self.brain_bus.set_asset_manifest_digest(digest);
     }
 
     fn append_dwm_reason_codes(
@@ -1080,6 +1096,13 @@ mod tests {
         fn commit_microcircuit_config(
             &mut self,
             _evidence: ucf::v1::MicrocircuitConfigEvidence,
+        ) -> Result<ucf::v1::PvgsReceipt, PvgsError> {
+            Ok(ucf::v1::PvgsReceipt::default())
+        }
+
+        fn commit_asset_manifest(
+            &mut self,
+            _manifest: ucf::v1::AssetManifest,
         ) -> Result<ucf::v1::PvgsReceipt, PvgsError> {
             Ok(ucf::v1::PvgsReceipt::default())
         }

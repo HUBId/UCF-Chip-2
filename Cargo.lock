@@ -52,6 +52,7 @@ name = "biophys_assets"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "ucf-protocol",
 ]
 
 [[package]]
@@ -366,6 +367,7 @@ name = "engine"
 version = "0.1.0"
 dependencies = [
  "baseline_resolver",
+ "biophys_assets",
  "biophys_core",
  "blake3",
  "chip4",

@@ -8,7 +8,8 @@ pub use local::{LocalPvgsReader, LocalPvgsWriter};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use ucf::v1::{
-    CharacterBaselineVector, MicrocircuitConfigEvidence, PolicyEcologyVector, PvgsReceipt,
+    AssetManifest, CharacterBaselineVector, MicrocircuitConfigEvidence, PolicyEcologyVector,
+    PvgsReceipt,
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -62,6 +63,8 @@ pub trait PvgsWriter: Send {
         &mut self,
         evidence: MicrocircuitConfigEvidence,
     ) -> Result<PvgsReceipt, PvgsError>;
+
+    fn commit_asset_manifest(&mut self, manifest: AssetManifest) -> Result<PvgsReceipt, PvgsError>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -133,6 +136,7 @@ impl PvgsReader for MockPvgsReader {
 pub struct MockPvgsWriter {
     pub committed: Vec<(String, [u8; 32])>,
     pub committed_microcircuit_configs: Vec<MicrocircuitConfigEvidence>,
+    pub committed_asset_manifests: Vec<AssetManifest>,
     pub fail_with: Option<String>,
 }
 
@@ -141,6 +145,7 @@ impl MockPvgsWriter {
         Self {
             committed: Vec::new(),
             committed_microcircuit_configs: Vec::new(),
+            committed_asset_manifests: Vec::new(),
             fail_with: Some(reason.into()),
         }
     }
@@ -176,6 +181,17 @@ impl PvgsWriter for MockPvgsWriter {
         self.committed_microcircuit_configs.push(evidence);
         Ok(PvgsReceipt::default())
     }
+
+    fn commit_asset_manifest(&mut self, manifest: AssetManifest) -> Result<PvgsReceipt, PvgsError> {
+        if let Some(reason) = &self.fail_with {
+            return Err(PvgsError::CommitFailed {
+                reason: reason.clone(),
+            });
+        }
+
+        self.committed_asset_manifests.push(manifest);
+        Ok(PvgsReceipt::default())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -199,6 +215,13 @@ impl PvgsWriter for PlaceholderPvgsClient {
     fn commit_microcircuit_config(
         &mut self,
         _evidence: MicrocircuitConfigEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_asset_manifest(
+        &mut self,
+        _manifest: AssetManifest,
     ) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }
@@ -262,6 +285,22 @@ mod tests {
 
         assert_eq!(writer.committed_microcircuit_configs.len(), 1);
         assert_eq!(writer.committed_microcircuit_configs[0], evidence);
+    }
+
+    #[test]
+    fn mock_writer_records_asset_manifest_commit() {
+        let mut writer = MockPvgsWriter::default();
+        let manifest = ucf::v1::AssetManifest {
+            manifest_version: 1,
+            created_at_ms: 10,
+            manifest_digest: vec![1; 32],
+            components: Vec::new(),
+        };
+
+        writer.commit_asset_manifest(manifest.clone()).unwrap();
+
+        assert_eq!(writer.committed_asset_manifests.len(), 1);
+        assert_eq!(writer.committed_asset_manifests[0], manifest);
     }
 
     #[test]

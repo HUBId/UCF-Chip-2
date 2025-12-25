@@ -87,6 +87,7 @@ pub struct BrainBus {
     last_hpa_output: HpaOutput,
     last_baseline_vector: BaselineVector,
     last_emotion_field: Option<EmotionField>,
+    asset_manifest_digest: Option<[u8; 32]>,
 }
 
 impl BrainBus {
@@ -204,6 +205,14 @@ impl BrainBus {
 
     pub fn last_cerebellum_output(&self) -> Option<dbm_18_cerebellum::CerOutput> {
         self.last_cerebellum_output.clone()
+    }
+
+    pub fn asset_manifest_digest(&self) -> Option<[u8; 32]> {
+        self.asset_manifest_digest
+    }
+
+    pub fn set_asset_manifest_digest(&mut self, digest: [u8; 32]) {
+        self.asset_manifest_digest = Some(digest);
     }
 
     pub fn set_last_cerebellum_output(&mut self, output: Option<dbm_18_cerebellum::CerOutput>) {

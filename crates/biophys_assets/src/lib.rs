@@ -100,6 +100,24 @@ pub struct AssetManifest {
     pub created_at_ms: u64,
 }
 
+pub fn to_asset_digest(
+    kind: ucf::v1::AssetKind,
+    version: u32,
+    digest: [u8; 32],
+    created_at_ms: u64,
+    prev: Option<[u8; 32]>,
+) -> ucf::v1::AssetDigest {
+    let digest_bytes = digest.to_vec();
+    debug_assert_eq!(digest_bytes.len(), 32);
+    ucf::v1::AssetDigest {
+        kind: kind as i32,
+        version,
+        digest: digest_bytes,
+        created_at_ms,
+        prev_digest: prev.map(|bytes| bytes.to_vec()),
+    }
+}
+
 pub fn artifact_digest(domain: &str, bytes: &[u8]) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(domain.as_bytes());
