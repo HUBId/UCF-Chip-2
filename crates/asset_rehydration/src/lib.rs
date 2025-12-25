@@ -186,9 +186,51 @@ pub fn decode_morphology(bytes: &[u8]) -> Result<MorphologySet, RehydrationError
                 diameter_um,
             });
         }
+        let mut labels = Vec::new();
+        if version >= 2 {
+            let label_count = cursor.take_u32()?;
+            if label_count as usize > biophys_assets::MAX_LABELS_PER_NEURON {
+                return Err(RehydrationError::DecodeFailed {
+                    message: format!(
+                        "label count {} exceeds max {}",
+                        label_count,
+                        biophys_assets::MAX_LABELS_PER_NEURON
+                    ),
+                });
+            }
+            for _ in 0..label_count {
+                let key_len = cursor.take_u16()? as usize;
+                if key_len > biophys_assets::MAX_LABEL_KEY_LEN {
+                    return Err(RehydrationError::DecodeFailed {
+                        message: format!("label key too long: {key_len}"),
+                    });
+                }
+                let key_bytes = cursor.take_exact(key_len)?;
+                let key = String::from_utf8(key_bytes.to_vec()).map_err(|_| {
+                    RehydrationError::DecodeFailed {
+                        message: "invalid label key utf8".to_string(),
+                    }
+                })?;
+
+                let value_len = cursor.take_u16()? as usize;
+                if value_len > biophys_assets::MAX_LABEL_VALUE_LEN {
+                    return Err(RehydrationError::DecodeFailed {
+                        message: format!("label value too long: {value_len}"),
+                    });
+                }
+                let value_bytes = cursor.take_exact(value_len)?;
+                let value = String::from_utf8(value_bytes.to_vec()).map_err(|_| {
+                    RehydrationError::DecodeFailed {
+                        message: "invalid label value utf8".to_string(),
+                    }
+                })?;
+                labels.push(biophys_assets::LabelKV { k: key, v: value });
+            }
+        }
         neurons.push(biophys_assets::MorphNeuron {
             neuron_id,
             compartments,
+            labels,
         });
     }
     cursor.ensure_consumed()?;

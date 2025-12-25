@@ -1,30 +1,16 @@
-# Asset Conventions
+## Asset conventions
 
-## Hypothalamus L4 Asset Convention v1
+### Morphology labels (v2)
 
-Hypothalamus L4 assets do not carry neuron labels yet, so pool assignment is
-deterministic by neuron id. Each neuron is a 3-compartment cell. Total neurons
-must be exactly 16; otherwise the bundle is rejected.
+Each neuron may include up to 8 label key/value pairs. Keys and values are bounded
+strings, and labels are ordered deterministically by `(k, v)` when encoded.
 
-### Profile pools
+#### Standard label keys
 
-| Pool | Neuron IDs |
-| --- | --- |
-| P0 M0 | 0–1 |
-| P1 M1 | 2–3 |
-| P2 M2 | 4–5 |
-| P3 M3 | 6–7 |
-
-### Overlay pools
-
-| Pool | Neuron IDs |
-| --- | --- |
-| O_sim | 8–9 |
-| O_exp | 10–11 |
-| O_nov | 12–13 |
-
-### Inhibitory control
-
-| Pool | Neuron IDs |
-| --- | --- |
-| Inhibitory | 14–15 |
+* `pool`
+  * **SN**: `EXEC`, `SIM`, `STAB`, `REPORT`, `INH`
+  * **Amygdala**: `INTEGRITY`, `EXFIL`, `PROBING`, `TOOLSE`, `INH`
+  * **Hypothalamus**: `P0`, `P1`, `P2`, `P3`, `O_SIM`, `O_EXP`, `O_NOV`, `INH`
+* `role`
+  * `E` (excitatory)
+  * `I` (inhibitory)

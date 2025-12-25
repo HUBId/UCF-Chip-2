@@ -2,6 +2,9 @@
 
 const MAX_COMPARTMENTS_PER_NEURON: usize = 64;
 const MAX_EDGES_PER_NEURON: usize = 64;
+pub const MAX_LABELS_PER_NEURON: usize = 8;
+pub const MAX_LABEL_KEY_LEN: usize = 32;
+pub const MAX_LABEL_VALUE_LEN: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MorphologySet {
@@ -13,6 +16,13 @@ pub struct MorphologySet {
 pub struct MorphNeuron {
     pub neuron_id: u32,
     pub compartments: Vec<Compartment>,
+    pub labels: Vec<LabelKV>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LabelKV {
+    pub k: String,
+    pub v: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -156,6 +166,7 @@ pub fn demo_morphology_3comp(neurons: u32) -> MorphologySet {
         morph_neurons.push(MorphNeuron {
             neuron_id,
             compartments,
+            labels: Vec::new(),
         });
     }
     MorphologySet {
@@ -172,6 +183,7 @@ pub fn morphology_tree(neurons: u32, compartments_per_neuron: u16) -> Morphology
         morph_neurons.push(MorphNeuron {
             neuron_id,
             compartments,
+            labels: Vec::new(),
         });
     }
     MorphologySet {
@@ -283,6 +295,40 @@ impl MorphologySet {
                 push_u8(&mut bytes, comp.kind as u8);
                 push_u16(&mut bytes, comp.length_um);
                 push_u16(&mut bytes, comp.diameter_um);
+            }
+            if self.version >= 2 {
+                let mut labels = neuron.labels.clone();
+                labels.sort_by(|a, b| {
+                    (a.k.as_str(), a.v.as_str()).cmp(&(b.k.as_str(), b.v.as_str()))
+                });
+                assert!(
+                    labels.len() <= MAX_LABELS_PER_NEURON,
+                    "label count {} exceeds max {}",
+                    labels.len(),
+                    MAX_LABELS_PER_NEURON
+                );
+                push_u32(&mut bytes, labels.len() as u32);
+                for label in labels {
+                    assert!(
+                        label.k.len() <= MAX_LABEL_KEY_LEN,
+                        "label key too long: {}",
+                        label.k.len()
+                    );
+                    assert!(
+                        label.v.len() <= MAX_LABEL_VALUE_LEN,
+                        "label value too long: {}",
+                        label.v.len()
+                    );
+                    push_u16(&mut bytes, label.k.len() as u16);
+                    bytes.extend_from_slice(label.k.as_bytes());
+                    push_u16(&mut bytes, label.v.len() as u16);
+                    bytes.extend_from_slice(label.v.as_bytes());
+                }
+            } else {
+                debug_assert!(
+                    neuron.labels.is_empty(),
+                    "labels require morphology version >= 2"
+                );
             }
         }
         bytes
@@ -507,6 +553,31 @@ mod tests {
         }
         let bytes_a = morph.to_canonical_bytes();
         let bytes_b = demo_morphology_3comp(3).to_canonical_bytes();
+        assert_eq!(bytes_a, bytes_b);
+    }
+
+    #[test]
+    fn canonical_label_sorting() {
+        let mut morph = demo_morphology_3comp(1);
+        morph.version = 2;
+        let neuron = &mut morph.neurons[0];
+        neuron.labels = vec![
+            LabelKV {
+                k: "role".to_string(),
+                v: "E".to_string(),
+            },
+            LabelKV {
+                k: "pool".to_string(),
+                v: "SIM".to_string(),
+            },
+        ];
+        let bytes_a = morph.to_canonical_bytes();
+
+        let mut sorted = morph.clone();
+        sorted.neurons[0]
+            .labels
+            .sort_by(|a, b| (a.k.as_str(), a.v.as_str()).cmp(&(b.k.as_str(), b.v.as_str())));
+        let bytes_b = sorted.to_canonical_bytes();
         assert_eq!(bytes_a, bytes_b);
     }
 

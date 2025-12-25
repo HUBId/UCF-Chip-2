@@ -79,11 +79,24 @@ const HYSTERESIS_TICKS: u8 = 3;
 const STABLE_COUNTER_TARGET: u8 = 2;
 const RECOVERY_GUARD_TICKS: u8 = 3;
 #[cfg(feature = "biophys-l4-hypothalamus-assets")]
-const ASSET_POOL_CONVENTION_VERSION: u32 = 1;
+const ASSET_POOL_CONVENTION_V1: u32 = 1;
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+const ASSET_POOL_CONVENTION_V2: u32 = 2;
 #[cfg(feature = "biophys-l4-hypothalamus-assets")]
 const MAX_ASSET_EDGES: usize = 10_000;
 #[cfg(feature = "biophys-l4-hypothalamus-assets")]
 const LEAK_G_SCALE: f32 = 0.1;
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+const LABEL_KEY_POOL: &str = "pool";
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+const LABEL_KEY_ROLE: &str = "role";
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+const ROLE_EXCITATORY: &str = "E";
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+const ROLE_INHIBITORY: &str = "I";
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+const POOL_LABELS: [&str; 8] = ["P0", "P1", "P2", "P3", "O_SIM", "O_EXP", "O_NOV", "INH"];
 
 #[derive(Debug, Clone)]
 struct L4Neuron {
@@ -147,6 +160,8 @@ pub struct HypothalamusL4Microcircuit {
     asset_manifest_digest: Option<[u8; 32]>,
     #[cfg(feature = "biophys-l4-hypothalamus-assets")]
     asset_pool_mapping_version: u32,
+    #[cfg(feature = "biophys-l4-hypothalamus-assets")]
+    asset_pool_mapping_digest: [u8; 32],
 }
 
 impl HypothalamusL4Microcircuit {
@@ -155,7 +170,7 @@ impl HypothalamusL4Microcircuit {
             .map(|idx| build_neuron(idx as u32))
             .collect::<Vec<_>>();
         let synapses = build_synapses();
-        Self::build_from_parts(config, neurons, synapses, None, 0)
+        Self::build_from_parts(config, neurons, synapses, None, 0, [0u8; 32])
     }
 
     #[cfg(feature = "biophys-l4-hypothalamus-assets")]
@@ -204,11 +219,9 @@ impl HypothalamusL4Microcircuit {
                 ),
             });
         }
-        validate_asset_convention_v1(&morph)?;
 
         let mut circuit = Self::build_from_assets(&morph, &chan, &syn, &conn)?;
         circuit.asset_manifest_digest = Some(manifest_digest);
-        circuit.asset_pool_mapping_version = ASSET_POOL_CONVENTION_VERSION;
         Ok(circuit)
     }
 
@@ -218,9 +231,14 @@ impl HypothalamusL4Microcircuit {
         synapses: Vec<SynapseL4>,
         asset_manifest_digest: Option<[u8; 32]>,
         asset_pool_mapping_version: u32,
+        asset_pool_mapping_digest: [u8; 32],
     ) -> Self {
         #[cfg(not(feature = "biophys-l4-hypothalamus-assets"))]
-        let _ = (asset_manifest_digest, asset_pool_mapping_version);
+        let _ = (
+            asset_manifest_digest,
+            asset_pool_mapping_version,
+            asset_pool_mapping_digest,
+        );
         let syn_states = vec![SynapseState::default(); synapses.len()];
         let current_modulators = ModulatorField::default();
         let mut homeostasis_config = HomeostasisConfig::default();
@@ -280,6 +298,8 @@ impl HypothalamusL4Microcircuit {
             asset_manifest_digest,
             #[cfg(feature = "biophys-l4-hypothalamus-assets")]
             asset_pool_mapping_version,
+            #[cfg(feature = "biophys-l4-hypothalamus-assets")]
+            asset_pool_mapping_digest,
         }
     }
 
@@ -1000,6 +1020,7 @@ impl MicrocircuitBackend<HypoInput, HypoOutput> for HypothalamusL4Microcircuit {
             let digest = self.asset_manifest_digest.unwrap_or([0u8; 32]);
             hasher.update(&digest);
             update_u32(&mut hasher, self.asset_pool_mapping_version);
+            hasher.update(&self.asset_pool_mapping_digest);
         }
         for neuron in &self.neurons {
             hasher.update(&neuron.solver.config_digest());
@@ -1328,23 +1349,23 @@ impl CircuitBuilderFromAssets for HypothalamusL4Microcircuit {
         syn: &SynapseParamsSet,
         conn: &ConnectivityGraph,
     ) -> Result<Self, AssetBuildError> {
-        let mut morph_neurons = morph.neurons.clone();
-        morph_neurons.sort_by_key(|neuron| neuron.neuron_id);
+        let labels_present = morph.neurons.iter().any(|neuron| !neuron.labels.is_empty());
+        let (pool_map, pool_mapping_version) = if labels_present {
+            (pool_map_from_labels(morph)?, ASSET_POOL_CONVENTION_V2)
+        } else {
+            (pool_map_from_ranges(morph)?, ASSET_POOL_CONVENTION_V1)
+        };
+        let pool_mapping_digest = pool_map_digest(&pool_map);
+        let ordered_neuron_ids = ordered_neurons_from_pool_map(&pool_map);
 
-        let mut seen = vec![false; NEURON_COUNT];
-        for neuron in &morph_neurons {
-            let idx = neuron.neuron_id as usize;
-            if idx >= NEURON_COUNT {
-                return Err(AssetBuildError::UnknownNeuron {
-                    neuron_id: neuron.neuron_id,
-                });
-            }
-            if seen[idx] {
-                return Err(AssetBuildError::InvalidAssetData {
-                    message: format!("duplicate neuron id {}", neuron.neuron_id),
-                });
-            }
-            seen[idx] = true;
+        let mut asset_to_internal = std::collections::BTreeMap::new();
+        for (internal_idx, asset_id) in ordered_neuron_ids.iter().enumerate() {
+            asset_to_internal.insert(*asset_id, internal_idx as u32);
+        }
+
+        let mut morph_map = std::collections::BTreeMap::new();
+        for neuron in &morph.neurons {
+            morph_map.insert(neuron.neuron_id, neuron);
         }
 
         let mut channel_map = std::collections::BTreeMap::new();
@@ -1352,8 +1373,13 @@ impl CircuitBuilderFromAssets for HypothalamusL4Microcircuit {
             channel_map.insert((params.neuron_id, params.comp_id), params);
         }
 
-        let mut morphologies = Vec::with_capacity(morph_neurons.len());
-        for neuron in &morph_neurons {
+        let mut morphologies = Vec::with_capacity(ordered_neuron_ids.len());
+        for (internal_idx, asset_id) in ordered_neuron_ids.iter().enumerate() {
+            let neuron = morph_map
+                .get(asset_id)
+                .ok_or(AssetBuildError::UnknownNeuron {
+                    neuron_id: *asset_id,
+                })?;
             let mut compartments = neuron.compartments.clone();
             compartments.sort_by_key(|comp| comp.comp_id);
             let depths = compute_compartment_depths(&compartments)?;
@@ -1376,7 +1402,7 @@ impl CircuitBuilderFromAssets for HypothalamusL4Microcircuit {
                 })
                 .collect::<Vec<_>>();
             let morphology = NeuronMorphology {
-                neuron_id: NeuronId(neuron.neuron_id),
+                neuron_id: NeuronId(internal_idx as u32),
                 compartments: morph_comps,
             };
             morphology
@@ -1388,17 +1414,21 @@ impl CircuitBuilderFromAssets for HypothalamusL4Microcircuit {
         }
 
         let mut neurons = Vec::with_capacity(morphologies.len());
-        for morphology in &morphologies {
+        for (internal_idx, morphology) in morphologies.iter().enumerate() {
+            let asset_id = ordered_neuron_ids
+                .get(internal_idx)
+                .copied()
+                .unwrap_or(morphology.neuron_id.0);
             let channels = morphology
                 .compartments
                 .iter()
                 .map(|comp| {
-                    let params = channel_map
-                        .get(&(morphology.neuron_id.0, comp.id.0))
-                        .ok_or(AssetBuildError::MissingChannelParams {
-                            neuron_id: morphology.neuron_id.0,
+                    let params = channel_map.get(&(asset_id, comp.id.0)).ok_or(
+                        AssetBuildError::MissingChannelParams {
+                            neuron_id: asset_id,
                             comp_id: comp.id.0,
-                        })?;
+                        },
+                    )?;
                     let leak = Leak {
                         g: params.leak_g as f32 * LEAK_G_SCALE,
                         e_rev: -65.0,
@@ -1444,18 +1474,16 @@ impl CircuitBuilderFromAssets for HypothalamusL4Microcircuit {
         let policy = default_targeting_policy();
         let mut synapses = Vec::with_capacity(edges.len());
         for edge in edges {
-            let pre = edge.pre as usize;
-            let post = edge.post as usize;
-            if pre >= morphologies.len() {
-                return Err(AssetBuildError::UnknownNeuron {
+            let pre = *asset_to_internal
+                .get(&edge.pre)
+                .ok_or(AssetBuildError::UnknownNeuron {
                     neuron_id: edge.pre,
-                });
-            }
-            if post >= morphologies.len() {
-                return Err(AssetBuildError::UnknownNeuron {
+                })? as usize;
+            let post = *asset_to_internal
+                .get(&edge.post)
+                .ok_or(AssetBuildError::UnknownNeuron {
                     neuron_id: edge.post,
-                });
-            }
+                })? as usize;
             let syn_params = syn.params.get(edge.syn_param_id as usize).ok_or(
                 AssetBuildError::MissingSynapseParams {
                     syn_param_id: edge.syn_param_id,
@@ -1490,15 +1518,15 @@ impl CircuitBuilderFromAssets for HypothalamusL4Microcircuit {
                 (params, state)
             };
             let edge_key = EdgeKey {
-                pre_neuron_id: NeuronId(edge.pre),
-                post_neuron_id: NeuronId(edge.post),
+                pre_neuron_id: NeuronId(pre as u32),
+                post_neuron_id: NeuronId(post as u32),
                 synapse_index: synapses.len() as u32,
             };
             let post_compartment =
                 select_post_compartment(&morphologies[post], kind, &policy, edge_key).0;
             synapses.push(SynapseL4 {
-                pre_neuron: edge.pre,
-                post_neuron: edge.post,
+                pre_neuron: pre as u32,
+                post_neuron: post as u32,
                 post_compartment,
                 kind,
                 mod_channel,
@@ -1524,34 +1552,172 @@ impl CircuitBuilderFromAssets for HypothalamusL4Microcircuit {
             neurons,
             synapses,
             None,
-            ASSET_POOL_CONVENTION_VERSION,
+            pool_mapping_version,
+            pool_mapping_digest,
         ))
     }
 }
 
 #[cfg(feature = "biophys-l4-hypothalamus-assets")]
-fn validate_asset_convention_v1(morph: &MorphologySet) -> Result<(), AssetBuildError> {
-    let mut seen = vec![false; NEURON_COUNT];
+type PoolMap = std::collections::BTreeMap<&'static str, Vec<u32>>;
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn pool_map_from_labels(morph: &MorphologySet) -> Result<PoolMap, AssetBuildError> {
+    let mut pool_map: PoolMap = std::collections::BTreeMap::new();
+    let mut seen = std::collections::BTreeSet::new();
     for neuron in &morph.neurons {
-        let idx = neuron.neuron_id as usize;
-        if idx >= NEURON_COUNT {
-            return Err(AssetBuildError::UnknownNeuron {
-                neuron_id: neuron.neuron_id,
-            });
-        }
-        if seen[idx] {
+        if !seen.insert(neuron.neuron_id) {
             return Err(AssetBuildError::InvalidAssetData {
                 message: format!("duplicate neuron id {}", neuron.neuron_id),
             });
         }
-        seen[idx] = true;
+        let mut pool_label: Option<&str> = None;
+        let mut role_label: Option<&str> = None;
+        for label in &neuron.labels {
+            if label.k == LABEL_KEY_POOL {
+                if pool_label.replace(label.v.as_str()).is_some() {
+                    return Err(AssetBuildError::InvalidAssetData {
+                        message: format!("multiple pool labels for neuron {}", neuron.neuron_id),
+                    });
+                }
+            } else if label.k == LABEL_KEY_ROLE {
+                if role_label.replace(label.v.as_str()).is_some() {
+                    return Err(AssetBuildError::InvalidAssetData {
+                        message: format!("multiple role labels for neuron {}", neuron.neuron_id),
+                    });
+                }
+            }
+        }
+        let pool = pool_label.ok_or_else(|| AssetBuildError::InvalidAssetData {
+            message: format!("missing pool label for neuron {}", neuron.neuron_id),
+        })?;
+        let role = role_label.ok_or_else(|| AssetBuildError::InvalidAssetData {
+            message: format!("missing role label for neuron {}", neuron.neuron_id),
+        })?;
+        let expected_role = if pool == "INH" {
+            ROLE_INHIBITORY
+        } else {
+            ROLE_EXCITATORY
+        };
+        if role != expected_role {
+            return Err(AssetBuildError::InvalidAssetData {
+                message: format!(
+                    "role label {role} invalid for pool {pool} on neuron {}",
+                    neuron.neuron_id
+                ),
+            });
+        }
+        if !POOL_LABELS.contains(&pool) {
+            return Err(AssetBuildError::InvalidAssetData {
+                message: format!("unknown pool label {pool} for neuron {}", neuron.neuron_id),
+            });
+        }
+        pool_map.entry(pool).or_default().push(neuron.neuron_id);
     }
-    if let Some((idx, _)) = seen.iter().enumerate().find(|(_, value)| !**value) {
+
+    for pool in POOL_LABELS {
+        let expected = if pool == "INH" {
+            INHIBITORY_COUNT
+        } else {
+            POOL_SIZE
+        };
+        let members = pool_map
+            .get_mut(pool)
+            .ok_or_else(|| AssetBuildError::InvalidAssetData {
+                message: format!("missing required pool {pool}"),
+            })?;
+        members.sort_unstable();
+        if members.len() != expected {
+            return Err(AssetBuildError::InvalidAssetData {
+                message: format!(
+                    "pool {pool} expected {expected} neurons, got {}",
+                    members.len()
+                ),
+            });
+        }
+    }
+    Ok(pool_map)
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn pool_map_from_ranges(morph: &MorphologySet) -> Result<PoolMap, AssetBuildError> {
+    let mut seen = std::collections::BTreeSet::new();
+    for neuron in &morph.neurons {
+        if !seen.insert(neuron.neuron_id) {
+            return Err(AssetBuildError::InvalidAssetData {
+                message: format!("duplicate neuron id {}", neuron.neuron_id),
+            });
+        }
+    }
+    if seen.len() != NEURON_COUNT {
         return Err(AssetBuildError::InvalidAssetData {
-            message: format!("missing neuron id {idx} for pool convention v1"),
+            message: format!("expected {NEURON_COUNT} neurons, got {}", seen.len()),
         });
     }
-    Ok(())
+    for neuron_id in 0..NEURON_COUNT as u32 {
+        if !seen.contains(&neuron_id) {
+            return Err(AssetBuildError::InvalidAssetData {
+                message: "Asset Convention v1 requires neuron ids 0..N-1".to_string(),
+            });
+        }
+    }
+
+    let mut pool_map: PoolMap = std::collections::BTreeMap::new();
+    pool_map.insert("P0", (0..POOL_SIZE as u32).collect());
+    pool_map.insert("P1", ((POOL_SIZE as u32)..(2 * POOL_SIZE) as u32).collect());
+    pool_map.insert(
+        "P2",
+        ((2 * POOL_SIZE) as u32..(3 * POOL_SIZE) as u32).collect(),
+    );
+    pool_map.insert(
+        "P3",
+        ((3 * POOL_SIZE) as u32..(4 * POOL_SIZE) as u32).collect(),
+    );
+    pool_map.insert(
+        "O_SIM",
+        ((4 * POOL_SIZE) as u32..(5 * POOL_SIZE) as u32).collect(),
+    );
+    pool_map.insert(
+        "O_EXP",
+        ((5 * POOL_SIZE) as u32..(6 * POOL_SIZE) as u32).collect(),
+    );
+    pool_map.insert(
+        "O_NOV",
+        ((6 * POOL_SIZE) as u32..(7 * POOL_SIZE) as u32).collect(),
+    );
+    pool_map.insert(
+        "INH",
+        (EXCITATORY_COUNT as u32..NEURON_COUNT as u32).collect(),
+    );
+    Ok(pool_map)
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn ordered_neurons_from_pool_map(pool_map: &PoolMap) -> Vec<u32> {
+    let mut ordered = Vec::with_capacity(NEURON_COUNT);
+    for pool in POOL_LABELS {
+        if let Some(neurons) = pool_map.get(pool) {
+            ordered.extend_from_slice(neurons);
+        }
+    }
+    ordered
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn pool_map_digest(pool_map: &PoolMap) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"UCF:BIO:L4:HYPO:POOLMAP");
+    for pool in POOL_LABELS {
+        if let Some(neurons) = pool_map.get(pool) {
+            update_u32(&mut hasher, pool.len() as u32);
+            hasher.update(pool.as_bytes());
+            update_u32(&mut hasher, neurons.len() as u32);
+            for neuron_id in neurons {
+                update_u32(&mut hasher, *neuron_id);
+            }
+        }
+    }
+    *hasher.finalize().as_bytes()
 }
 
 #[cfg(feature = "biophys-l4-hypothalamus-assets")]
@@ -1930,7 +2096,7 @@ mod asset_tests {
     use asset_rehydration::ASSET_MANIFEST_DOMAIN;
     use biophys_assets::{
         to_asset_digest, ChannelParams, ChannelParamsSet, Compartment as AssetCompartment,
-        CompartmentKind as AssetCompartmentKind, ConnEdge, ConnectivityGraph, ModChannel,
+        CompartmentKind as AssetCompartmentKind, ConnEdge, ConnectivityGraph, LabelKV, ModChannel,
         MorphNeuron, MorphologySet, SynType, SynapseParams, SynapseParamsSet,
     };
     use prost::Message;
@@ -1948,6 +2114,21 @@ mod asset_tests {
     fn hypo_morphology_assets(neuron_count: usize) -> MorphologySet {
         let neurons = (0..neuron_count as u32)
             .map(|neuron_id| {
+                let pool = match neuron_id as usize {
+                    0..=1 => "P0",
+                    2..=3 => "P1",
+                    4..=5 => "P2",
+                    6..=7 => "P3",
+                    8..=9 => "O_SIM",
+                    10..=11 => "O_EXP",
+                    12..=13 => "O_NOV",
+                    _ => "INH",
+                };
+                let role = if neuron_id as usize >= EXCITATORY_COUNT {
+                    "I"
+                } else {
+                    "E"
+                };
                 let compartments = vec![
                     AssetCompartment {
                         comp_id: 0,
@@ -1974,11 +2155,21 @@ mod asset_tests {
                 MorphNeuron {
                     neuron_id,
                     compartments,
+                    labels: vec![
+                        LabelKV {
+                            k: "pool".to_string(),
+                            v: pool.to_string(),
+                        },
+                        LabelKV {
+                            k: "role".to_string(),
+                            v: role.to_string(),
+                        },
+                    ],
                 }
             })
             .collect();
         MorphologySet {
-            version: 1,
+            version: 2,
             neurons,
         }
     }
@@ -2111,6 +2302,13 @@ mod asset_tests {
         }
 
         ConnectivityGraph { version: 1, edges }
+    }
+
+    fn hypo_empty_connectivity_assets() -> ConnectivityGraph {
+        ConnectivityGraph {
+            version: 1,
+            edges: Vec::new(),
+        }
     }
 
     fn compute_manifest_digest(manifest: &AssetManifest) -> [u8; 32] {
@@ -2302,6 +2500,96 @@ mod asset_tests {
             .collect::<Vec<_>>();
 
         assert_eq!(outputs_a, outputs_b);
+    }
+
+    #[test]
+    fn asset_pool_mapping_uses_labels() {
+        let mut morph = hypo_morphology_assets(NEURON_COUNT);
+        for neuron in &mut morph.neurons {
+            for label in &mut neuron.labels {
+                if label.k == "pool" {
+                    label.v = match label.v.as_str() {
+                        "P0" => "P1".to_string(),
+                        "P1" => "P0".to_string(),
+                        other => other.to_string(),
+                    };
+                }
+            }
+        }
+        let chan = hypo_channel_params_assets(&morph);
+        let syn = hypo_synapse_params_assets();
+        let conn = hypo_empty_connectivity_assets();
+
+        let circuit = <HypothalamusL4Microcircuit as CircuitBuilderFromAssets>::build_from_assets(
+            &morph, &chan, &syn, &conn,
+        )
+        .expect("asset build");
+        let pool_map = pool_map_from_labels(&morph).expect("pool map");
+        assert_eq!(circuit.asset_pool_mapping_version, ASSET_POOL_CONVENTION_V2);
+        assert_eq!(
+            circuit.asset_pool_mapping_digest,
+            pool_map_digest(&pool_map)
+        );
+    }
+
+    #[test]
+    fn asset_pool_mapping_v1_fallback_accepts_unlabeled_bundle() {
+        let mut morph = hypo_morphology_assets(NEURON_COUNT);
+        morph.version = 1;
+        for neuron in &mut morph.neurons {
+            neuron.labels.clear();
+        }
+        let chan = hypo_channel_params_assets(&morph);
+        let syn = hypo_synapse_params_assets();
+        let conn = hypo_connectivity_assets();
+        let bundle = build_asset_bundle(&morph, &chan, &syn, &conn);
+        let rehydrator = AssetRehydrator::new();
+
+        let circuit =
+            HypothalamusL4Microcircuit::new_from_asset_bundle(&bundle, &rehydrator).expect("asset");
+        let pool_map = pool_map_from_ranges(&morph).expect("pool map");
+        assert_eq!(circuit.asset_pool_mapping_version, ASSET_POOL_CONVENTION_V1);
+        assert_eq!(
+            circuit.asset_pool_mapping_digest,
+            pool_map_digest(&pool_map)
+        );
+    }
+
+    #[test]
+    fn asset_pool_mapping_rejects_missing_pool_label() {
+        let mut morph = hypo_morphology_assets(NEURON_COUNT);
+        if let Some(neuron) = morph.neurons.get_mut(0) {
+            neuron.labels.retain(|label| label.k != "pool");
+        }
+        let chan = hypo_channel_params_assets(&morph);
+        let syn = hypo_synapse_params_assets();
+        let conn = hypo_empty_connectivity_assets();
+
+        let err = <HypothalamusL4Microcircuit as CircuitBuilderFromAssets>::build_from_assets(
+            &morph, &chan, &syn, &conn,
+        )
+        .expect_err("missing pool label should fail");
+        assert!(matches!(err, AssetBuildError::InvalidAssetData { .. }));
+    }
+
+    #[test]
+    fn asset_pool_mapping_rejects_duplicate_pool_labels() {
+        let mut morph = hypo_morphology_assets(NEURON_COUNT);
+        if let Some(neuron) = morph.neurons.get_mut(0) {
+            neuron.labels.push(LabelKV {
+                k: "pool".to_string(),
+                v: "P0".to_string(),
+            });
+        }
+        let chan = hypo_channel_params_assets(&morph);
+        let syn = hypo_synapse_params_assets();
+        let conn = hypo_empty_connectivity_assets();
+
+        let err = <HypothalamusL4Microcircuit as CircuitBuilderFromAssets>::build_from_assets(
+            &morph, &chan, &syn, &conn,
+        )
+        .expect_err("duplicate pool label should fail");
+        assert!(matches!(err, AssetBuildError::InvalidAssetData { .. }));
     }
 
     #[test]
