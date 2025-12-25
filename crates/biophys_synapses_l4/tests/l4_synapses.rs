@@ -30,6 +30,7 @@ fn build_single_compartment_neuron(neuron_id: u32) -> L4Neuron {
         id: biophys_core::CompartmentId(0),
         parent: None,
         kind: CompartmentKind::Soma,
+        depth: 0,
         capacitance: 1.0,
         axial_resistance: 150.0,
     }];

@@ -128,6 +128,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "biophys_targeting_l4"
+version = "0.1.0"
+dependencies = [
+ "biophys_core",
+ "biophys_morphology",
+ "biophys_synapses_l4",
+ "blake3",
+]
+
+[[package]]
 name = "blake3"
 version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -510,6 +520,7 @@ dependencies = [
  "biophys_morphology",
  "biophys_plasticity_l4",
  "biophys_synapses_l4",
+ "biophys_targeting_l4",
  "blake3",
  "dbm_core",
  "microcircuit_amygdala_stub",
@@ -595,6 +606,7 @@ dependencies = [
  "biophys_morphology",
  "biophys_plasticity_l4",
  "biophys_synapses_l4",
+ "biophys_targeting_l4",
  "blake3",
  "dbm_core",
  "microcircuit_core",
@@ -635,6 +647,7 @@ dependencies = [
  "biophys_morphology",
  "biophys_plasticity_l4",
  "biophys_synapses_l4",
+ "biophys_targeting_l4",
  "blake3",
  "dbm_core",
  "microcircuit_core",
@@ -726,6 +739,7 @@ dependencies = [
  "biophys_morphology",
  "biophys_plasticity_l4",
  "biophys_synapses_l4",
+ "biophys_targeting_l4",
  "blake3",
  "dbm_core",
  "microcircuit_core",
@@ -834,6 +848,7 @@ dependencies = [
  "biophys_morphology",
  "biophys_plasticity_l4",
  "biophys_synapses_l4",
+ "biophys_targeting_l4",
  "blake3",
  "dbm_core",
  "microcircuit_core",

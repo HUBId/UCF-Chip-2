@@ -1,0 +1,15 @@
+[package]
+name = "biophys_targeting_l4"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+biophys = []
+biophys-l4 = ["biophys"]
+biophys-l4-targeting = ["biophys-l4"]
+
+[dependencies]
+biophys_core = { path = "../biophys_core", features = ["biophys", "biophys-l4"] }
+biophys_morphology = { path = "../biophys_morphology", features = ["biophys", "biophys-l4"] }
+biophys_synapses_l4 = { path = "../biophys_synapses_l4", features = ["biophys", "biophys-l4", "biophys-l4-synapses"] }
+blake3 = "1"
