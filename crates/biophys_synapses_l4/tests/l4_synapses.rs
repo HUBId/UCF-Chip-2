@@ -1,10 +1,14 @@
-#![cfg(all(feature = "biophys", feature = "biophys-l4", feature = "biophys-l4-synapses"))]
+#![cfg(all(
+    feature = "biophys",
+    feature = "biophys-l4",
+    feature = "biophys-l4-synapses"
+))]
 
 use biophys_channels::Leak;
 use biophys_compartmental_solver::{CompartmentChannels, L4Solver, L4State};
 use biophys_event_queue_l4::SpikeEventQueueL4;
 use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
-use biophys_synapses_l4::{decay_k, SynapseAccumulator, SynapseL4, SynapseState, SynKind};
+use biophys_synapses_l4::{decay_k, SynKind, SynapseAccumulator, SynapseL4, SynapseState};
 
 const DT_MS: f32 = 0.1;
 const THRESHOLD_MV: f32 = -20.0;
@@ -37,8 +41,8 @@ fn build_single_compartment_neuron(neuron_id: u32) -> L4Neuron {
 
     let channels = vec![CompartmentChannels { leak, nak: None }];
 
-    let solver = L4Solver::new(morphology, channels, DT_MS, -120.0, 60.0)
-        .expect("solver should initialize");
+    let solver =
+        L4Solver::new(morphology, channels, DT_MS, -120.0, 60.0).expect("solver should initialize");
     let state = L4State::new(-65.0, 1);
 
     L4Neuron {
@@ -112,7 +116,10 @@ fn build_pre_index(neuron_count: usize, synapses: &[SynapseL4]) -> Vec<Vec<usize
 
 #[test]
 fn delay_is_applied_to_synaptic_conductance() {
-    let mut neurons = vec![build_single_compartment_neuron(0), build_single_compartment_neuron(1)];
+    let mut neurons = vec![
+        build_single_compartment_neuron(0),
+        build_single_compartment_neuron(1),
+    ];
     let synapses = vec![SynapseL4 {
         pre_neuron: 0,
         post_neuron: 1,
@@ -131,7 +138,11 @@ fn delay_is_applied_to_synaptic_conductance() {
     let mut g_history = Vec::new();
     let mut spike_step = None;
     for step in 0..5 {
-        let inputs = if step == 0 { vec![1000.0, 0.0] } else { vec![0.0, 0.0] };
+        let inputs = if step == 0 {
+            vec![1000.0, 0.0]
+        } else {
+            vec![0.0, 0.0]
+        };
         let spikes = run_tick(
             step,
             &mut neurons,
