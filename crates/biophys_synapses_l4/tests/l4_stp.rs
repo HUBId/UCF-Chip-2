@@ -251,11 +251,7 @@ fn stp_integration_shows_depression_over_repeated_spikes() {
 
     let mut g_increments = Vec::new();
     for step in 0..4 {
-        let inputs = if step == 0 {
-            vec![1000.0, 0.0]
-        } else {
-            vec![1000.0, 0.0]
-        };
+        let inputs = vec![1000.0, 0.0];
         let before = syn_states[0].g_fixed;
         run_tick_stp(
             step,
