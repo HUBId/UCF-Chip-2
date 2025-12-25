@@ -210,6 +210,7 @@ pub fn control_frame_from_brain_output(
     // Preserve all reason codes for callers while keeping a deterministic order.
     sanitize_reason_codes(&mut profile_reason_codes, usize::MAX);
 
+    // TODO: Extend ControlFrame proto to transport evidence refs (e.g., mc_snap:plasticity).
     let mut control_frame = ControlFrame {
         active_profile: Some(profile),
         overlays: Some(overlays),

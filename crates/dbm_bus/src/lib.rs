@@ -536,6 +536,12 @@ impl BrainBus {
                 digest,
             });
         }
+        if let Some(digest) = self.sn.plasticity_snapshot_digest_opt() {
+            evidence_refs.push(EvidenceRef {
+                kind: EvidenceKind::PlasticitySnapshot,
+                digest,
+            });
+        }
         if evidence_refs.len() > MAX_EVIDENCE_REFS {
             evidence_refs.truncate(MAX_EVIDENCE_REFS);
         }

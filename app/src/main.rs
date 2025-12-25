@@ -86,6 +86,7 @@ fn format_evidence_kind(kind: EvidenceKind) -> &'static str {
     match kind {
         EvidenceKind::LcMicroSnapshot => "mc:lc",
         EvidenceKind::SnMicroSnapshot => "mc:sn",
+        EvidenceKind::PlasticitySnapshot => "mc_snap:plasticity",
         EvidenceKind::RulesetDigest => "ruleset",
         EvidenceKind::CbvDigest => "cbv",
         EvidenceKind::PevDigest => "pev",

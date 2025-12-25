@@ -133,6 +133,11 @@ impl AmygdalaL4Microcircuit {
         let queue = SpikeEventQueueL4::new(max_delay, MAX_EVENTS_PER_STEP);
         let stdp_traces = vec![StdpTrace::default(); NEURON_COUNT];
         let stdp_spike_flags = vec![false; NEURON_COUNT];
+        let mut stdp_config = StdpConfig::default();
+        if cfg!(feature = "biophys-l4-plasticity") {
+            stdp_config.enabled = true;
+            stdp_config.learning_mode = LearningMode::REPLAY_ONLY;
+        }
         Self {
             _config: config,
             neurons,
@@ -145,7 +150,7 @@ impl AmygdalaL4Microcircuit {
             queue,
             state: AmyL4State::default(),
             current_modulators,
-            stdp_config: StdpConfig::default(),
+            stdp_config,
             stdp_traces,
             stdp_spike_flags,
             learning_enabled: false,
@@ -434,6 +439,17 @@ impl AmygdalaL4Microcircuit {
             .collect::<Vec<_>>();
         plasticity_snapshot_digest(self.state.step_count, &g_max_values)
     }
+
+    pub fn plasticity_snapshot_digest_opt(&self) -> Option<[u8; 32]> {
+        if !cfg!(feature = "biophys-l4-plasticity") {
+            return None;
+        }
+        if self.learning_enabled && self.stdp_config.enabled {
+            Some(self.plasticity_snapshot_digest())
+        } else {
+            None
+        }
+    }
 }
 
 impl MicrocircuitBackend<AmyInput, AmyOutput> for AmygdalaL4Microcircuit {
@@ -551,6 +567,10 @@ impl MicrocircuitBackend<AmyInput, AmyOutput> for AmygdalaL4Microcircuit {
             update_u32(&mut hasher, synapse.delay_steps as u32);
         }
         *hasher.finalize().as_bytes()
+    }
+
+    fn plasticity_snapshot_digest_opt(&self) -> Option<[u8; 32]> {
+        AmygdalaL4Microcircuit::plasticity_snapshot_digest_opt(self)
     }
 }
 

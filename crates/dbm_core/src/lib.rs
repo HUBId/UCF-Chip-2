@@ -133,6 +133,7 @@ pub enum ThreatVector {
 pub enum EvidenceKind {
     LcMicroSnapshot,
     SnMicroSnapshot,
+    PlasticitySnapshot,
     RulesetDigest,
     CbvDigest,
     PevDigest,

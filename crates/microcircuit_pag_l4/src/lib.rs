@@ -149,6 +149,11 @@ impl PagL4Microcircuit {
         let queue = SpikeEventQueueL4::new(max_delay, MAX_EVENTS_PER_STEP);
         let stdp_traces = vec![StdpTrace::default(); NEURON_COUNT];
         let stdp_spike_flags = vec![false; NEURON_COUNT];
+        let mut stdp_config = StdpConfig::default();
+        if cfg!(feature = "biophys-l4-plasticity") {
+            stdp_config.enabled = true;
+            stdp_config.learning_mode = LearningMode::REPLAY_ONLY;
+        }
         Self {
             _config: config,
             neurons,
@@ -161,7 +166,7 @@ impl PagL4Microcircuit {
             queue,
             state: PagL4State::default(),
             current_modulators,
-            stdp_config: StdpConfig::default(),
+            stdp_config,
             stdp_traces,
             stdp_spike_flags,
             learning_enabled: false,
@@ -393,6 +398,17 @@ impl PagL4Microcircuit {
         plasticity_snapshot_digest(self.state.step_count, &g_max_values)
     }
 
+    pub fn plasticity_snapshot_digest_opt(&self) -> Option<[u8; 32]> {
+        if !cfg!(feature = "biophys-l4-plasticity") {
+            return None;
+        }
+        if self.learning_enabled && self.stdp_config.enabled {
+            Some(self.plasticity_snapshot_digest())
+        } else {
+            None
+        }
+    }
+
     fn update_pool_accumulators(&mut self, spike_counts: &[usize; NEURON_COUNT]) {
         let mut pool_counts = [0usize; POOL_COUNT];
         for (idx, count) in spike_counts.iter().enumerate().take(EXCITATORY_COUNT) {
@@ -599,6 +615,10 @@ impl MicrocircuitBackend<PagInput, PagOutput> for PagL4Microcircuit {
             update_u32(&mut hasher, synapse.delay_steps as u32);
         }
         *hasher.finalize().as_bytes()
+    }
+
+    fn plasticity_snapshot_digest_opt(&self) -> Option<[u8; 32]> {
+        PagL4Microcircuit::plasticity_snapshot_digest_opt(self)
     }
 }
 

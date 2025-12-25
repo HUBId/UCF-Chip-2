@@ -31,6 +31,10 @@ pub trait MicrocircuitBackend<I, O> {
     fn snapshot_digest(&self) -> [u8; 32];
 
     fn config_digest(&self) -> [u8; 32];
+
+    fn plasticity_snapshot_digest_opt(&self) -> Option<[u8; 32]> {
+        None
+    }
 }
 
 pub fn digest_meta(domain: &str, bytes: &[u8]) -> [u8; 32] {

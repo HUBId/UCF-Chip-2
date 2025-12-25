@@ -266,6 +266,13 @@ impl SubstantiaNigra {
         }
     }
 
+    pub fn plasticity_snapshot_digest_opt(&self) -> Option<[u8; 32]> {
+        match &self.backend {
+            SnBackend::Micro(backend) => backend.plasticity_snapshot_digest_opt(),
+            SnBackend::Rules(_) => None,
+        }
+    }
+
     pub fn config_digest(&self) -> Option<[u8; 32]> {
         match &self.backend {
             SnBackend::Micro(backend) => Some(backend.config_digest()),

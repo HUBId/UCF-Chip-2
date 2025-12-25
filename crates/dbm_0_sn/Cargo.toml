@@ -18,6 +18,10 @@ biophys-l4-sn = [
     "microcircuit_sn_l4/biophys-l4-sn",
     "biophys-l4-synapses",
 ]
+biophys-l4-plasticity = [
+    "biophys-l4-sn",
+    "microcircuit_sn_l4/biophys-l4-plasticity",
+]
 biophys-sn = [
     "microcircuit-sn",
     "dep:microcircuit_sn_biophys",

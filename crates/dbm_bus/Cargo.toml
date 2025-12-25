@@ -12,6 +12,7 @@ microcircuit-sn = ["dbm_0_sn/microcircuit-sn"]
 microcircuit-sn-attractor = ["dbm_0_sn/microcircuit-sn-attractor"]
 biophys-sn = ["dbm_0_sn/biophys-sn"]
 biophys-l4-sn = ["dbm_0_sn/biophys-l4-sn"]
+biophys-l4-plasticity = ["dbm_0_sn/biophys-l4-plasticity"]
 biophys-stn = ["dbm_stn/biophys-stn"]
 biophys-l4-insula = ["dbm_12_insula/biophys-l4-insula"]
 
