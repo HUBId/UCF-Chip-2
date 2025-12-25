@@ -63,6 +63,7 @@ pub struct L4Solver {
     dt_ms: f32,
     clamp_min: f32,
     clamp_max: f32,
+    #[cfg(feature = "biophys-l4-ca")]
     max_depth: u32,
     step_count: u64,
 }
@@ -155,6 +156,7 @@ impl L4Solver {
         }
 
         let axial_currents = vec![0.0_f32; morphology.compartments.len()];
+        #[cfg(feature = "biophys-l4-ca")]
         let max_depth = morphology
             .compartments
             .iter()
@@ -170,6 +172,7 @@ impl L4Solver {
             dt_ms,
             clamp_min,
             clamp_max,
+            #[cfg(feature = "biophys-l4-ca")]
             max_depth,
             step_count: 0,
         })
@@ -221,8 +224,7 @@ impl L4Solver {
             }
         }
 
-        for index in 0..self.morphology.compartments.len() {
-            let compartment = &self.morphology.compartments[index];
+        for (index, compartment) in self.morphology.compartments.iter().enumerate() {
             let channels = self.channels[index];
             let v = state.voltages[index];
             let gates = state.gates[index];
@@ -322,8 +324,7 @@ impl L4Solver {
             }
         }
 
-        for index in 0..self.morphology.compartments.len() {
-            let compartment = &self.morphology.compartments[index];
+        for (index, compartment) in self.morphology.compartments.iter().enumerate() {
             let channels = self.channels[index];
             let v = state.voltages[index];
             let gates = state.gates[index];
@@ -458,6 +459,7 @@ fn update_f32(hasher: &mut blake3::Hasher, value: f32) {
     hasher.update(&value.to_bits().to_le_bytes());
 }
 
+#[cfg(feature = "biophys-l4-ca")]
 fn is_distal(comp_depth: u32, max_depth: u32) -> bool {
     comp_depth >= max_depth.saturating_sub(1)
 }
