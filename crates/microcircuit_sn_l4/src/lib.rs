@@ -6,7 +6,9 @@ use biophys_core::{CompartmentId, NeuronId};
 use biophys_event_queue_l4::SpikeEventQueueL4;
 use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
 use biophys_synapses_l4::{decay_k, SynKind, SynapseAccumulator, SynapseL4, SynapseState};
-use dbm_core::{DbmModule, DwmMode, IntegrityState, LevelClass, ReasonSet, SalienceItem, SalienceSource};
+use dbm_core::{
+    DbmModule, DwmMode, IntegrityState, LevelClass, ReasonSet, SalienceItem, SalienceSource,
+};
 use microcircuit_core::{CircuitConfig, MicrocircuitBackend};
 use microcircuit_sn_stub::{SnInput, SnOutput};
 
@@ -320,11 +322,10 @@ impl SnL4Microcircuit {
 
         for spike_idx in &spikes {
             let indices = &self.pre_index[*spike_idx];
-            self.queue.schedule_spike(
-                self.state.step_count,
-                indices,
-                |idx| self.synapses[idx].delay_steps,
-            );
+            self.queue
+                .schedule_spike(self.state.step_count, indices, |idx| {
+                    self.synapses[idx].delay_steps
+                });
         }
 
         self.state.step_count = self.state.step_count.saturating_add(1);
