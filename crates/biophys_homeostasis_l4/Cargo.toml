@@ -1,0 +1,12 @@
+[package]
+name = "biophys_homeostasis_l4"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+biophys = []
+biophys-l4 = ["biophys"]
+biophys-l4-homeostasis = ["biophys-l4"]
+
+[dependencies]
+blake3 = "1"

@@ -78,6 +78,7 @@ members = [
     "crates/scorecards",
     "crates/biophys_synapses_l4",
     "crates/biophys_plasticity_l4",
+    "crates/biophys_homeostasis_l4",
 ]
 resolver = "2"
 

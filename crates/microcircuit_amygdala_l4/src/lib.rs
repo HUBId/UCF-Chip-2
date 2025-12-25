@@ -4,6 +4,9 @@ use biophys_channels::{Leak, NaK};
 use biophys_compartmental_solver::{CompartmentChannels, L4Solver, L4State};
 use biophys_core::{CompartmentId, ModChannel, ModLevel, ModulatorField, NeuronId};
 use biophys_event_queue_l4::SpikeEventQueueL4;
+use biophys_homeostasis_l4::{
+    homeostasis_tick, scale_g_max_fixed, HomeoMode, HomeostasisConfig, HomeostasisState,
+};
 use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
 use biophys_plasticity_l4::{plasticity_snapshot_digest, LearningMode, StdpConfig, StdpTrace};
 use biophys_synapses_l4::{
@@ -102,6 +105,8 @@ pub struct AmygdalaL4Microcircuit {
     stdp_spike_flags: Vec<bool>,
     learning_enabled: bool,
     in_replay_mode: bool,
+    homeostasis_config: HomeostasisConfig,
+    homeostasis_state: HomeostasisState,
 }
 
 impl AmygdalaL4Microcircuit {
@@ -112,9 +117,17 @@ impl AmygdalaL4Microcircuit {
         let synapses = build_synapses();
         let syn_states = vec![SynapseState::default(); synapses.len()];
         let current_modulators = ModulatorField::default();
+        let mut homeostasis_config = HomeostasisConfig::default();
+        if cfg!(feature = "biophys-l4-homeostasis") {
+            homeostasis_config.enabled = true;
+            homeostasis_config.mode = HomeoMode::REPLAY_ONLY;
+        }
+        let homeostasis_state = HomeostasisState::default();
         let syn_g_max_eff = synapses
             .iter()
-            .map(|synapse| synapse.effective_g_max_fixed(current_modulators))
+            .map(|synapse| {
+                Self::scaled_g_max_fixed(synapse, current_modulators, homeostasis_state.scale_q)
+            })
             .collect::<Vec<_>>();
         let syn_decay = synapses
             .iter()
@@ -155,6 +168,8 @@ impl AmygdalaL4Microcircuit {
             stdp_spike_flags,
             learning_enabled: false,
             in_replay_mode: false,
+            homeostasis_config,
+            homeostasis_state,
         }
     }
 
@@ -290,7 +305,11 @@ impl AmygdalaL4Microcircuit {
     fn update_modulators(&mut self, input: &AmyInput) {
         self.current_modulators = input.modulators;
         for (idx, synapse) in self.synapses.iter().enumerate() {
-            self.syn_g_max_eff[idx] = synapse.effective_g_max_fixed(self.current_modulators);
+            self.syn_g_max_eff[idx] = Self::scaled_g_max_fixed(
+                synapse,
+                self.current_modulators,
+                self.homeostasis_state.scale_q,
+            );
             self.syn_stp_params_eff[idx] = synapse.stp_effective_params(self.current_modulators);
         }
     }
@@ -299,8 +318,52 @@ impl AmygdalaL4Microcircuit {
     fn update_modulators(&mut self, _input: &AmyInput) {
         self.current_modulators = ModulatorField::default();
         for (idx, synapse) in self.synapses.iter().enumerate() {
-            self.syn_g_max_eff[idx] = synapse.effective_g_max_fixed(self.current_modulators);
+            self.syn_g_max_eff[idx] = Self::scaled_g_max_fixed(
+                synapse,
+                self.current_modulators,
+                self.homeostasis_state.scale_q,
+            );
             self.syn_stp_params_eff[idx] = synapse.stp_effective_params(self.current_modulators);
+        }
+    }
+
+    fn scaled_g_max_fixed(
+        synapse: &SynapseL4,
+        mods: ModulatorField,
+        scale_q: u16,
+    ) -> u32 {
+        let g_max_eff = synapse.effective_g_max_fixed(mods);
+        if synapse.kind == SynKind::AMPA {
+            scale_g_max_fixed(g_max_eff, scale_q, max_synapse_g_fixed())
+        } else {
+            g_max_eff
+        }
+    }
+
+    fn refresh_syn_g_max_eff(&mut self) {
+        for (idx, synapse) in self.synapses.iter().enumerate() {
+            self.syn_g_max_eff[idx] = Self::scaled_g_max_fixed(
+                synapse,
+                self.current_modulators,
+                self.homeostasis_state.scale_q,
+            );
+        }
+    }
+
+    fn update_homeostasis(&mut self, spike_counts: &[usize; NEURON_COUNT]) {
+        let excitatory_spikes = spike_counts
+            .iter()
+            .take(EXCITATORY_COUNT)
+            .map(|value| *value as u32)
+            .sum();
+        let updated = homeostasis_tick(
+            self.homeostasis_config,
+            &mut self.homeostasis_state,
+            excitatory_spikes,
+            self.in_replay_mode,
+        );
+        if updated {
+            self.refresh_syn_g_max_eff();
         }
     }
 
@@ -426,9 +489,7 @@ impl AmygdalaL4Microcircuit {
             &self.stdp_traces,
             self.stdp_config,
         );
-        for (idx, synapse) in self.synapses.iter().enumerate() {
-            self.syn_g_max_eff[idx] = synapse.effective_g_max_fixed(self.current_modulators);
-        }
+        self.refresh_syn_g_max_eff();
     }
 
     pub fn plasticity_snapshot_digest(&self) -> [u8; 32] {
@@ -477,6 +538,7 @@ impl MicrocircuitBackend<AmyInput, AmyOutput> for AmygdalaL4Microcircuit {
             }
         }
 
+        self.update_homeostasis(&spike_counts);
         self.update_pool_accumulators(&spike_counts);
         self.update_latches();
 

@@ -18,6 +18,10 @@ biophys-l4-pag = [
     "microcircuit_pag_l4/biophys-l4-pag",
     "biophys-l4-synapses",
 ]
+biophys-l4-homeostasis = [
+    "biophys-l4-pag",
+    "microcircuit_pag_l4/biophys-l4-homeostasis",
+]
 biophys-pag = [
     "microcircuit-pag-attractor",
     "dep:microcircuit_pag_biophys",

@@ -13,6 +13,7 @@ biophys-l4-synapses = ["biophys-l4"]
 biophys-l4-stp = ["biophys-l4-synapses"]
 biophys-l4-modulation = ["biophys-l4-synapses"]
 biophys-l4-plasticity = ["biophys-l4-synapses", "biophys_synapses_l4/biophys-l4-plasticity"]
+biophys-l4-homeostasis = ["biophys-l4-synapses", "biophys_homeostasis_l4/biophys-l4-homeostasis"]
 biophys-l4-pag = ["biophys-l4-synapses"]
 
 [dependencies]
@@ -20,6 +21,7 @@ biophys_channels = { path = "../biophys_channels", features = ["biophys", "bioph
 biophys_compartmental_solver = { path = "../biophys_compartmental_solver", features = ["biophys", "biophys-l4", "biophys-l4-synapses"] }
 biophys_core = { path = "../biophys_core", features = ["biophys", "biophys-l4"] }
 biophys_event_queue_l4 = { path = "../biophys_event_queue_l4", features = ["biophys", "biophys-l4", "biophys-l4-synapses", "biophys-l4-stp"] }
+biophys_homeostasis_l4 = { path = "../biophys_homeostasis_l4", features = ["biophys", "biophys-l4"] }
 biophys_morphology = { path = "../biophys_morphology", features = ["biophys", "biophys-l4"] }
 biophys_plasticity_l4 = { path = "../biophys_plasticity_l4" }
 biophys_synapses_l4 = { path = "../biophys_synapses_l4", features = ["biophys", "biophys-l4", "biophys-l4-synapses", "biophys-l4-stp", "biophys-l4-modulation"] }

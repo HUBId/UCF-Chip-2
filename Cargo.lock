@@ -79,6 +79,13 @@ name = "biophys_event_queue_l4"
 version = "0.1.0"
 
 [[package]]
+name = "biophys_homeostasis_l4"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+]
+
+[[package]]
 name = "biophys_morphology"
 version = "0.1.0"
 dependencies = [
@@ -499,6 +506,7 @@ dependencies = [
  "biophys_compartmental_solver",
  "biophys_core",
  "biophys_event_queue_l4",
+ "biophys_homeostasis_l4",
  "biophys_morphology",
  "biophys_plasticity_l4",
  "biophys_synapses_l4",
@@ -583,6 +591,7 @@ dependencies = [
  "biophys_compartmental_solver",
  "biophys_core",
  "biophys_event_queue_l4",
+ "biophys_homeostasis_l4",
  "biophys_morphology",
  "biophys_plasticity_l4",
  "biophys_synapses_l4",
@@ -622,6 +631,7 @@ dependencies = [
  "biophys_compartmental_solver",
  "biophys_core",
  "biophys_event_queue_l4",
+ "biophys_homeostasis_l4",
  "biophys_morphology",
  "biophys_plasticity_l4",
  "biophys_synapses_l4",
@@ -712,6 +722,7 @@ dependencies = [
  "biophys_compartmental_solver",
  "biophys_core",
  "biophys_event_queue_l4",
+ "biophys_homeostasis_l4",
  "biophys_morphology",
  "biophys_plasticity_l4",
  "biophys_synapses_l4",
@@ -819,6 +830,7 @@ dependencies = [
  "biophys_compartmental_solver",
  "biophys_core",
  "biophys_event_queue_l4",
+ "biophys_homeostasis_l4",
  "biophys_morphology",
  "biophys_plasticity_l4",
  "biophys_synapses_l4",

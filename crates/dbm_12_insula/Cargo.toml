@@ -17,6 +17,10 @@ biophys-l4-insula = [
     "microcircuit_insula_l4/biophys-l4-insula",
     "biophys-l4-synapses",
 ]
+biophys-l4-homeostasis = [
+    "biophys-l4-insula",
+    "microcircuit_insula_l4/biophys-l4-homeostasis",
+]
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
