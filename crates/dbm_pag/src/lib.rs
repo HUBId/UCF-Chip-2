@@ -44,7 +44,16 @@ impl Pag {
 
     #[cfg(feature = "microcircuit-pag-attractor")]
     pub fn new_micro(config: CircuitConfig) -> Self {
-        #[cfg(feature = "biophys-pag")]
+        #[cfg(feature = "biophys-l4-pag")]
+        {
+            use microcircuit_pag_l4::PagL4Microcircuit;
+
+            return Self {
+                backend: PagBackend::Micro(Box::new(PagL4Microcircuit::new(config))),
+            };
+        }
+
+        #[cfg(all(feature = "biophys-pag", not(feature = "biophys-l4-pag")))]
         {
             use microcircuit_pag_biophys::PagBiophysMicrocircuit;
 
@@ -53,7 +62,7 @@ impl Pag {
             };
         }
 
-        #[cfg(not(feature = "biophys-pag"))]
+        #[cfg(all(not(feature = "biophys-pag"), not(feature = "biophys-l4-pag")))]
         {
             use microcircuit_pag_attractor::PagAttractorMicrocircuit;
 

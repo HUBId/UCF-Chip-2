@@ -9,6 +9,15 @@ path = "src/lib.rs"
 [features]
 microcircuit-pag-attractor = ["microcircuit_pag_attractor"]
 biophys = []
+biophys-l4 = ["biophys"]
+biophys-l4-synapses = ["biophys-l4"]
+biophys-l4-modulation = ["biophys-l4-synapses", "microcircuit_pag_l4/biophys-l4-modulation"]
+biophys-l4-pag = [
+    "microcircuit-pag-attractor",
+    "dep:microcircuit_pag_l4",
+    "microcircuit_pag_l4/biophys-l4-pag",
+    "biophys-l4-synapses",
+]
 biophys-pag = [
     "microcircuit-pag-attractor",
     "dep:microcircuit_pag_biophys",
@@ -22,6 +31,7 @@ microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_pag_attractor = { path = "../microcircuit_pag_attractor", optional = true }
 microcircuit_pag_stub = { path = "../microcircuit_pag_stub" }
 microcircuit_pag_biophys = { path = "../microcircuit_pag_biophys", optional = true }
+microcircuit_pag_l4 = { path = "../microcircuit_pag_l4", optional = true }
 
 [dev-dependencies]
 biophys_core = { path = "../biophys_core" }

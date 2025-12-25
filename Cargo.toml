@@ -51,6 +51,7 @@ members = [
     "crates/microcircuit_pag_stub",
     "crates/microcircuit_pag_attractor",
     "crates/microcircuit_pag_biophys",
+    "crates/microcircuit_pag_l4",
     "crates/microcircuit_stn_stub",
     "crates/microcircuit_stn_hold",
     "crates/microcircuit_stn_biophys",
