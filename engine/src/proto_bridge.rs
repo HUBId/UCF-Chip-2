@@ -349,6 +349,7 @@ fn build_insula_input(
         pev_present,
         hbv_present: false,
         progress,
+        reward_block: false,
         dominant_reason_codes: normalized_reason_strings(&frame.reason_codes),
         arousal: BrainLevel::Low,
         stability: BrainLevel::Low,

@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use dbm_core::DbmModule;
-#[cfg(feature = "microcircuit-insula-fusion")]
+#[cfg(any(feature = "microcircuit-insula-fusion", feature = "biophys-l4-insula"))]
 use microcircuit_core::CircuitConfig;
 use microcircuit_core::MicrocircuitBackend;
 pub use microcircuit_insula_stub::{InsulaInput, InsulaRules};
@@ -37,8 +37,25 @@ pub struct Insula {
 
 impl Insula {
     pub fn new() -> Self {
-        Self {
-            backend: InsulaBackend::Rules(InsulaRules::new()),
+        #[cfg(feature = "biophys-l4-insula")]
+        {
+            Self::new_l4(CircuitConfig::default())
+        }
+        #[cfg(all(
+            feature = "microcircuit-insula-fusion",
+            not(feature = "biophys-l4-insula")
+        ))]
+        {
+            Self::new_micro(CircuitConfig::default())
+        }
+        #[cfg(all(
+            not(feature = "microcircuit-insula-fusion"),
+            not(feature = "biophys-l4-insula")
+        ))]
+        {
+            Self {
+                backend: InsulaBackend::Rules(InsulaRules::new()),
+            }
         }
     }
 
@@ -48,6 +65,15 @@ impl Insula {
 
         Self {
             backend: InsulaBackend::Micro(Box::new(InsulaFusionMicrocircuit::new(config))),
+        }
+    }
+
+    #[cfg(feature = "biophys-l4-insula")]
+    pub fn new_l4(config: CircuitConfig) -> Self {
+        use microcircuit_insula_l4::InsulaL4Microcircuit;
+
+        Self {
+            backend: InsulaBackend::Micro(Box::new(InsulaL4Microcircuit::new(config))),
         }
     }
 

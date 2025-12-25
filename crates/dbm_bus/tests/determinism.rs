@@ -138,7 +138,7 @@ fn tick_outputs_stable_and_reason_codes_sorted() {
         .all(|pair| pair[0] <= pair[1]));
     assert!(output_a.reason_codes.len() <= ReasonSet::DEFAULT_MAX_LEN);
 
-    let expected = if cfg!(feature = "biophys-stn") {
+    let expected = if cfg!(feature = "biophys-stn") || cfg!(feature = "biophys-l4-insula") {
         vec![
             "RC.GV.DIVERGENCE.HIGH".to_string(),
             "RC.GV.DWM.REPORT".to_string(),

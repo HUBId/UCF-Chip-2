@@ -179,6 +179,7 @@ dependencies = [
  "dbm_core",
  "microcircuit_core",
  "microcircuit_insula_fusion",
+ "microcircuit_insula_l4",
  "microcircuit_insula_stub",
 ]
 
@@ -599,6 +600,22 @@ dependencies = [
  "microcircuit_core",
  "microcircuit_insula_stub",
  "microcircuit_pag_stub",
+]
+
+[[package]]
+name = "microcircuit_insula_l4"
+version = "0.1.0"
+dependencies = [
+ "biophys_channels",
+ "biophys_compartmental_solver",
+ "biophys_core",
+ "biophys_event_queue_l4",
+ "biophys_morphology",
+ "biophys_synapses_l4",
+ "blake3",
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_insula_stub",
 ]
 
 [[package]]

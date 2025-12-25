@@ -8,9 +8,19 @@ path = "src/lib.rs"
 
 [features]
 microcircuit-insula-fusion = []
+biophys = []
+biophys-l4 = ["biophys"]
+biophys-l4-synapses = ["biophys-l4"]
+biophys-l4-modulation = ["biophys-l4-synapses", "microcircuit_insula_l4/biophys-l4-modulation"]
+biophys-l4-insula = [
+    "dep:microcircuit_insula_l4",
+    "microcircuit_insula_l4/biophys-l4-insula",
+    "biophys-l4-synapses",
+]
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_insula_stub = { path = "../microcircuit_insula_stub" }
 microcircuit_insula_fusion = { path = "../microcircuit_insula_fusion" }
+microcircuit_insula_l4 = { path = "../microcircuit_insula_l4", optional = true }

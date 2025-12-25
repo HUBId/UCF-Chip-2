@@ -402,6 +402,7 @@ impl BrainBus {
             .dominant_reason_codes
             .extend(pag_output.reason_codes.codes.clone());
         insula_input.progress = dopa_output.progress;
+        insula_input.reward_block = dopa_output.reward_block;
         let mut isv = self.insula.tick(&insula_input);
         isv.threat = level_max(isv.threat, amy_output.threat);
         isv.threat_vectors = Some(amy_output.vectors.clone());
