@@ -30,6 +30,7 @@ members = [
     "crates/memristor_backend",
     "crates/microcircuit_hpa_memristor",
     "crates/microcircuit_hypothalamus_setpoint",
+    "crates/microcircuit_hypothalamus_l4",
     "crates/microcircuit_sn_stub",
     "crates/microcircuit_sn_attractor",
     "crates/microcircuit_sn_biophys",

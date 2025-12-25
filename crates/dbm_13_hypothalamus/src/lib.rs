@@ -4,7 +4,10 @@ use dbm_core::{
     BaselineVector, DbmModule, IntegrityState, IsvSnapshot, LevelClass, OverlaySet, ProfileState,
     ReasonSet, ThreatVector,
 };
-#[cfg(feature = "microcircuit-hypothalamus-setpoint")]
+#[cfg(any(
+    feature = "microcircuit-hypothalamus-setpoint",
+    feature = "biophys-l4-hypothalamus"
+))]
 use microcircuit_core::CircuitConfig;
 use microcircuit_core::MicrocircuitBackend;
 pub use microcircuit_hypothalamus_setpoint::{HypoInput, HypoOutput};
@@ -88,6 +91,31 @@ pub struct Hypothalamus {
 
 impl Hypothalamus {
     pub fn new() -> Self {
+        #[cfg(feature = "biophys-l4-hypothalamus")]
+        {
+            use microcircuit_hypothalamus_l4::HypothalamusL4Microcircuit;
+
+            return Self {
+                backend: HypothalamusBackend::Micro(Box::new(HypothalamusL4Microcircuit::new(
+                    CircuitConfig::default(),
+                ))),
+            };
+        }
+
+        #[cfg(all(
+            not(feature = "biophys-l4-hypothalamus"),
+            feature = "microcircuit-hypothalamus-setpoint"
+        ))]
+        {
+            use microcircuit_hypothalamus_setpoint::HypothalamusSetpointMicrocircuit;
+
+            return Self {
+                backend: HypothalamusBackend::Micro(Box::new(
+                    HypothalamusSetpointMicrocircuit::new(CircuitConfig::default()),
+                )),
+            };
+        }
+
         Self {
             backend: HypothalamusBackend::Rules(HypothalamusRules::new()),
         }
