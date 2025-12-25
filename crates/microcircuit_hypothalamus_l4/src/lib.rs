@@ -78,6 +78,7 @@ const ACCUMULATOR_GAIN: i32 = 20;
 const HYSTERESIS_TICKS: u8 = 3;
 const STABLE_COUNTER_TARGET: u8 = 2;
 const RECOVERY_GUARD_TICKS: u8 = 3;
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
 const ASSET_POOL_CONVENTION_VERSION: u32 = 1;
 #[cfg(feature = "biophys-l4-hypothalamus-assets")]
 const MAX_ASSET_EDGES: usize = 10_000;
