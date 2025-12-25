@@ -9,6 +9,7 @@ use biophys_compartmental_solver::{CompartmentChannels, L4Solver, L4State};
 use biophys_core::{ModChannel, STP_SCALE};
 use biophys_event_queue_l4::SpikeEventQueueL4;
 use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
+use biophys_plasticity_l4::StdpTrace;
 use biophys_synapses_l4::{
     decay_k, f32_to_fixed_u32, max_synapse_g_fixed, SynKind, SynapseAccumulator, SynapseL4,
     SynapseState,
@@ -137,12 +138,16 @@ fn delay_is_applied_to_synaptic_conductance() {
         kind: SynKind::AMPA,
         mod_channel: ModChannel::None,
         g_max_base_q: f32_to_fixed_u32(4.0),
+        g_max_min_q: 0,
+        g_max_max_q: max_synapse_g_fixed(),
         e_rev: 0.0,
         tau_rise_ms: 0.0,
         tau_decay_ms: 8.0,
         delay_steps: 2,
         stp_params: Default::default(),
         stp_state: Default::default(),
+        stdp_enabled: false,
+        stdp_trace: StdpTrace::default(),
     }];
     let mut syn_states = vec![SynapseState::default(); synapses.len()];
     let pre_index = build_pre_index(neurons.len(), &synapses);
@@ -186,12 +191,16 @@ fn deterministic_runs_match() {
         kind: SynKind::AMPA,
         mod_channel: ModChannel::None,
         g_max_base_q: f32_to_fixed_u32(6.0),
+        g_max_min_q: 0,
+        g_max_max_q: max_synapse_g_fixed(),
         e_rev: 0.0,
         tau_rise_ms: 0.0,
         tau_decay_ms: 10.0,
         delay_steps: 1,
         stp_params: Default::default(),
         stp_state: Default::default(),
+        stdp_enabled: false,
+        stdp_trace: StdpTrace::default(),
     }];
 
     let run = || {
@@ -255,12 +264,16 @@ fn synaptic_input_advances_spike_time() {
         kind: SynKind::AMPA,
         mod_channel: ModChannel::None,
         g_max_base_q: f32_to_fixed_u32(8.0),
+        g_max_min_q: 0,
+        g_max_max_q: max_synapse_g_fixed(),
         e_rev: 0.0,
         tau_rise_ms: 0.0,
         tau_decay_ms: 12.0,
         delay_steps: 1,
         stp_params: Default::default(),
         stp_state: Default::default(),
+        stdp_enabled: false,
+        stdp_trace: StdpTrace::default(),
     }];
 
     let simulate = |enable_synapse: bool| {

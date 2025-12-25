@@ -10,6 +10,7 @@ use biophys_compartmental_solver::{CompartmentChannels, L4Solver, L4State};
 use biophys_core::{ModChannel, STP_SCALE};
 use biophys_event_queue_l4::SpikeEventQueueL4;
 use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
+use biophys_plasticity_l4::StdpTrace;
 use biophys_synapses_l4::{
     decay_k, f32_to_fixed_u32, max_synapse_g_fixed, StpMode, StpParamsL4, StpStateL4, SynKind,
     SynapseAccumulator, SynapseL4, SynapseState,
@@ -75,12 +76,16 @@ fn build_stp_synapse() -> SynapseL4 {
         kind: SynKind::AMPA,
         mod_channel: ModChannel::None,
         g_max_base_q: f32_to_fixed_u32(4.0),
+        g_max_min_q: 0,
+        g_max_max_q: max_synapse_g_fixed(),
         e_rev: 0.0,
         tau_rise_ms: 0.0,
         tau_decay_ms: 8.0,
         delay_steps: 0,
         stp_params: params,
         stp_state: StpStateL4::new(params),
+        stdp_enabled: false,
+        stdp_trace: StdpTrace::default(),
     }
 }
 

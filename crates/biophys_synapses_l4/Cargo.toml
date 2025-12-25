@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 biophys_core = { path = "../biophys_core", features = ["biophys", "biophys-l4"] }
+biophys_plasticity_l4 = { path = "../biophys_plasticity_l4" }
 
 [features]
 biophys = []
@@ -12,6 +13,7 @@ biophys-l4 = ["biophys"]
 biophys-l4-synapses = ["biophys-l4"]
 biophys-l4-stp = ["biophys-l4-synapses"]
 biophys-l4-modulation = ["biophys-l4-synapses"]
+biophys-l4-plasticity = ["biophys-l4-synapses"]
 
 [dev-dependencies]
 biophys_channels = { path = "../biophys_channels", features = ["biophys", "biophys-l4"] }

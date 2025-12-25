@@ -86,6 +86,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "biophys_plasticity_l4"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+]
+
+[[package]]
 name = "biophys_runtime"
 version = "0.1.0"
 dependencies = [
@@ -110,6 +117,7 @@ dependencies = [
  "biophys_core",
  "biophys_event_queue_l4",
  "biophys_morphology",
+ "biophys_plasticity_l4",
 ]
 
 [[package]]
@@ -492,6 +500,7 @@ dependencies = [
  "biophys_core",
  "biophys_event_queue_l4",
  "biophys_morphology",
+ "biophys_plasticity_l4",
  "biophys_synapses_l4",
  "blake3",
  "dbm_core",
@@ -575,6 +584,7 @@ dependencies = [
  "biophys_core",
  "biophys_event_queue_l4",
  "biophys_morphology",
+ "biophys_plasticity_l4",
  "biophys_synapses_l4",
  "blake3",
  "dbm_core",
@@ -613,6 +623,7 @@ dependencies = [
  "biophys_core",
  "biophys_event_queue_l4",
  "biophys_morphology",
+ "biophys_plasticity_l4",
  "biophys_synapses_l4",
  "blake3",
  "dbm_core",
@@ -702,6 +713,7 @@ dependencies = [
  "biophys_core",
  "biophys_event_queue_l4",
  "biophys_morphology",
+ "biophys_plasticity_l4",
  "biophys_synapses_l4",
  "blake3",
  "dbm_core",
@@ -808,6 +820,7 @@ dependencies = [
  "biophys_core",
  "biophys_event_queue_l4",
  "biophys_morphology",
+ "biophys_plasticity_l4",
  "biophys_synapses_l4",
  "blake3",
  "dbm_core",

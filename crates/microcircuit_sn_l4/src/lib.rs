@@ -5,9 +5,10 @@ use biophys_compartmental_solver::{CompartmentChannels, L4Solver, L4State};
 use biophys_core::{CompartmentId, ModChannel, ModLevel, ModulatorField, NeuronId};
 use biophys_event_queue_l4::SpikeEventQueueL4;
 use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
+use biophys_plasticity_l4::{plasticity_snapshot_digest, LearningMode, StdpConfig, StdpTrace};
 use biophys_synapses_l4::{
-    decay_k, f32_to_fixed_u32, StpParamsL4, StpStateL4, SynKind, SynapseAccumulator, SynapseL4,
-    SynapseState,
+    apply_stdp_updates, decay_k, f32_to_fixed_u32, max_synapse_g_fixed, StpParamsL4, StpStateL4,
+    SynKind, SynapseAccumulator, SynapseL4, SynapseState,
 };
 use dbm_core::{
     DbmModule, DwmMode, IntegrityState, LevelClass, ReasonSet, SalienceItem, SalienceSource,
@@ -100,6 +101,11 @@ pub struct SnL4Microcircuit {
     queue: SpikeEventQueueL4,
     state: SnL4State,
     current_modulators: ModulatorField,
+    stdp_config: StdpConfig,
+    stdp_traces: Vec<StdpTrace>,
+    stdp_spike_flags: Vec<bool>,
+    learning_enabled: bool,
+    in_replay_mode: bool,
 }
 
 impl SnL4Microcircuit {
@@ -129,6 +135,8 @@ impl SnL4Microcircuit {
             .max()
             .unwrap_or(0);
         let queue = SpikeEventQueueL4::new(max_delay, MAX_EVENTS_PER_STEP);
+        let stdp_traces = vec![StdpTrace::default(); NEURON_COUNT];
+        let stdp_spike_flags = vec![false; NEURON_COUNT];
         Self {
             _config: config,
             neurons,
@@ -141,6 +149,11 @@ impl SnL4Microcircuit {
             queue,
             state: SnL4State::default(),
             current_modulators,
+            stdp_config: StdpConfig::default(),
+            stdp_traces,
+            stdp_spike_flags,
+            learning_enabled: false,
+            in_replay_mode: false,
         }
     }
 
@@ -330,6 +343,30 @@ impl SnL4Microcircuit {
         }
     }
 
+    fn set_learning_context(
+        &mut self,
+        in_replay: bool,
+        mods: ModulatorField,
+        reward_block: bool,
+    ) {
+        self.in_replay_mode = in_replay;
+        if !cfg!(feature = "biophys-l4-plasticity") {
+            self.learning_enabled = false;
+            return;
+        }
+        if !self.stdp_config.enabled {
+            self.learning_enabled = false;
+            return;
+        }
+        let mode_allowed = match self.stdp_config.learning_mode {
+            LearningMode::OFF => false,
+            LearningMode::REPLAY_ONLY => in_replay,
+            LearningMode::ALWAYS => true,
+        };
+        let da_allowed = matches!(mods.da, ModLevel::Med | ModLevel::High);
+        self.learning_enabled = mode_allowed && da_allowed && !reward_block;
+    }
+
     fn substep(&mut self, injected_currents: &[f32; NEURON_COUNT]) -> Vec<usize> {
         for (state, decay) in self.syn_states.iter_mut().zip(self.syn_decay.iter()) {
             state.decay(*decay);
@@ -393,8 +430,53 @@ impl SnL4Microcircuit {
             );
         }
 
+        self.update_stdp_traces(&spikes);
+        self.apply_stdp_updates(&spikes);
+
         self.state.step_count = self.state.step_count.saturating_add(1);
         spikes
+    }
+
+    fn update_stdp_traces(&mut self, spikes: &[usize]) {
+        for trace in &mut self.stdp_traces {
+            trace.decay_tick(self.stdp_config.tau_plus_steps, self.stdp_config.tau_minus_steps);
+        }
+        for &idx in spikes {
+            if let Some(trace) = self.stdp_traces.get_mut(idx) {
+                trace.on_pre_spike();
+                trace.on_post_spike();
+            }
+        }
+    }
+
+    fn apply_stdp_updates(&mut self, spikes: &[usize]) {
+        if !self.learning_enabled || spikes.is_empty() {
+            return;
+        }
+        self.stdp_spike_flags.fill(false);
+        for &idx in spikes {
+            if let Some(flag) = self.stdp_spike_flags.get_mut(idx) {
+                *flag = true;
+            }
+        }
+        apply_stdp_updates(
+            &mut self.synapses,
+            &self.stdp_spike_flags,
+            &self.stdp_traces,
+            self.stdp_config,
+        );
+        for (idx, synapse) in self.synapses.iter().enumerate() {
+            self.syn_g_max_eff[idx] = synapse.effective_g_max_fixed(self.current_modulators);
+        }
+    }
+
+    pub fn plasticity_snapshot_digest(&self) -> [u8; 32] {
+        let g_max_values = self
+            .synapses
+            .iter()
+            .map(|synapse| synapse.g_max_base_q)
+            .collect::<Vec<_>>();
+        plasticity_snapshot_digest(self.state.step_count, &g_max_values)
     }
 
     #[cfg(test)]
@@ -431,6 +513,7 @@ impl MicrocircuitBackend<SnInput, SnOutput> for SnL4Microcircuit {
     fn step(&mut self, input: &SnInput, _now_ms: u64) -> SnOutput {
         self.state.tick_count = self.state.tick_count.saturating_add(1);
         self.update_modulators(input);
+        self.set_learning_context(input.replay_hint, self.current_modulators, input.reward_block);
         #[cfg(feature = "biophys-l4-stp")]
         {
             for (synapse, params) in self
@@ -658,12 +741,16 @@ fn build_synapses() -> Vec<SynapseL4> {
                     kind: SynKind::AMPA,
                     mod_channel: ModChannel::NaDa,
                     g_max_base_q: f32_to_fixed_u32(AMPA_G_MAX),
+                    g_max_min_q: 0,
+                    g_max_max_q: max_synapse_g_fixed(),
                     e_rev: AMPA_E_REV,
                     tau_rise_ms: AMPA_TAU_RISE_MS,
                     tau_decay_ms: AMPA_TAU_DECAY_MS,
                     delay_steps: delay,
                     stp_params,
                     stp_state,
+                    stdp_enabled: true,
+                    stdp_trace: StdpTrace::default(),
                 });
             }
         }
@@ -680,12 +767,16 @@ fn build_synapses() -> Vec<SynapseL4> {
                 kind: SynKind::AMPA,
                 mod_channel: ModChannel::Na,
                 g_max_base_q: f32_to_fixed_u32(AMPA_G_MAX),
+                g_max_min_q: 0,
+                g_max_max_q: max_synapse_g_fixed(),
                 e_rev: AMPA_E_REV,
                 tau_rise_ms: AMPA_TAU_RISE_MS,
                 tau_decay_ms: AMPA_TAU_DECAY_MS,
                 delay_steps: 1,
                 stp_params,
                 stp_state,
+                stdp_enabled: true,
+                stdp_trace: StdpTrace::default(),
             });
         }
     }
@@ -701,12 +792,16 @@ fn build_synapses() -> Vec<SynapseL4> {
                 kind: SynKind::GABA,
                 mod_channel: ModChannel::Ht,
                 g_max_base_q: f32_to_fixed_u32(GABA_G_MAX),
+                g_max_min_q: 0,
+                g_max_max_q: max_synapse_g_fixed(),
                 e_rev: GABA_E_REV,
                 tau_rise_ms: GABA_TAU_RISE_MS,
                 tau_decay_ms: GABA_TAU_DECAY_MS,
                 delay_steps: 1,
                 stp_params,
                 stp_state,
+                stdp_enabled: false,
+                stdp_trace: StdpTrace::default(),
             });
         }
     }

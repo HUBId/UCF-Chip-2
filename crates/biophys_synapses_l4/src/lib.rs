@@ -3,12 +3,15 @@
 #[cfg(feature = "biophys-l4-modulation")]
 use biophys_core::ModLevel;
 use biophys_core::{level_mul, ModChannel, ModulatorField, STP_SCALE};
+use biophys_plasticity_l4::{StdpConfig, StdpTrace, TRACE_SCALE_Q};
 
 pub const FIXED_POINT_SCALE: u32 = 1 << 16;
 const FIXED_POINT_SCALE_I64: i64 = 1 << 16;
 const DECAY_SCALE: u32 = 1024;
 const MAX_SYNAPSE_G: f32 = 1000.0;
 const MAX_ACCUMULATOR_G: f32 = 5000.0;
+/// STDP delta scaling: dw_q (0..1000) maps to Q16.16 by shifting left 6 bits.
+pub const STDP_WEIGHT_SHIFT: u32 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SynKind {
@@ -81,12 +84,16 @@ pub struct SynapseL4 {
     pub kind: SynKind,
     pub mod_channel: ModChannel,
     pub g_max_base_q: u32,
+    pub g_max_min_q: u32,
+    pub g_max_max_q: u32,
     pub e_rev: f32,
     pub tau_rise_ms: f32,
     pub tau_decay_ms: f32,
     pub delay_steps: u16,
     pub stp_params: StpParamsL4,
     pub stp_state: StpStateL4,
+    pub stdp_enabled: bool,
+    pub stdp_trace: StdpTrace,
 }
 
 impl SynapseL4 {
@@ -192,6 +199,64 @@ impl SynapseState {
         }
         let decay = (self.g_fixed as u64 * decay_k as u64) / DECAY_SCALE as u64;
         self.g_fixed = self.g_fixed.saturating_sub(decay as u32);
+    }
+}
+
+pub fn apply_stdp_updates(
+    synapses: &mut [SynapseL4],
+    spike_flags: &[bool],
+    traces: &[StdpTrace],
+    config: StdpConfig,
+) {
+    if spike_flags.len() != traces.len() {
+        return;
+    }
+    let scale = TRACE_SCALE_Q as u32;
+    for synapse in synapses.iter_mut() {
+        if !synapse.stdp_enabled {
+            continue;
+        }
+        let pre = synapse.pre_neuron as usize;
+        if pre >= spike_flags.len() {
+            continue;
+        }
+        if !spike_flags[pre] {
+            continue;
+        }
+        let post = synapse.post_neuron as usize;
+        if post >= traces.len() {
+            continue;
+        }
+        let post_trace = traces[post].post_trace_q.min(TRACE_SCALE_Q) as u32;
+        let dw_q = (config.a_minus_q as u32 * post_trace) / scale;
+        let dw_g_q = dw_q << STDP_WEIGHT_SHIFT;
+        let updated = synapse.g_max_base_q.saturating_sub(dw_g_q);
+        synapse.g_max_base_q = updated
+            .max(synapse.g_max_min_q)
+            .min(synapse.g_max_max_q);
+    }
+    for synapse in synapses.iter_mut() {
+        if !synapse.stdp_enabled {
+            continue;
+        }
+        let post = synapse.post_neuron as usize;
+        if post >= spike_flags.len() {
+            continue;
+        }
+        if !spike_flags[post] {
+            continue;
+        }
+        let pre = synapse.pre_neuron as usize;
+        if pre >= traces.len() {
+            continue;
+        }
+        let pre_trace = traces[pre].pre_trace_q.min(TRACE_SCALE_Q) as u32;
+        let dw_q = (config.a_plus_q as u32 * pre_trace) / scale;
+        let dw_g_q = dw_q << STDP_WEIGHT_SHIFT;
+        let updated = synapse.g_max_base_q.saturating_add(dw_g_q);
+        synapse.g_max_base_q = updated
+            .max(synapse.g_max_min_q)
+            .min(synapse.g_max_max_q);
     }
 }
 
