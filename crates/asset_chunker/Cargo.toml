@@ -8,3 +8,4 @@ blake3 = "1"
 ucf = { package = "ucf-protocol", path = "../../ucf-protocol" }
 prost = "0.12"
 thiserror = "1"
+zstd = "0.13"

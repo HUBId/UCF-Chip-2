@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 blake3 = "1"
 ucf = { package = "ucf-protocol", path = "../../ucf-protocol" }
+prost = "0.12"
 
 [dev-dependencies]
 

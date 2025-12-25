@@ -1,10 +1,17 @@
 #![forbid(unsafe_code)]
 
-use biophys_assets::{ChannelParamsSet, ConnectivityGraph, MorphologySet, SynapseParamsSet};
+use biophys_assets::{
+    channel_params_from_payload, morphology_from_payload, normalize_payload_channel_params,
+    normalize_payload_connectivity, normalize_payload_morphology, normalize_payload_synapse_params,
+    synapse_params_from_payload, MAX_EDGES,
+};
 use blake3::Hasher;
 use prost::Message;
 use thiserror::Error;
-use ucf::v1::{AssetBundle, AssetChunk, AssetKind, AssetManifest, Compression};
+use ucf::v1::{
+    AssetBundle, AssetChunk, AssetKind, AssetManifest, ChannelParamsSetPayload, Compression,
+    ConnectivityGraphPayload, MorphologySetPayload, SynapseParamsSetPayload,
+};
 
 pub const ASSET_CHUNK_DOMAIN: &str = "UCF:ASSET:CHUNK";
 pub const ASSET_BUNDLE_DOMAIN: &str = "UCF:ASSET:BUNDLE";
@@ -22,6 +29,10 @@ pub enum RehydrationError {
     ManifestDigestMismatch,
     #[error("missing chunks for asset")]
     MissingChunks,
+    #[error("missing asset manifest")]
+    MissingManifest,
+    #[error("missing asset digest for kind {kind:?}")]
+    MissingAssetDigest { kind: AssetKind },
     #[error("chunk index {index} out of range {count}")]
     ChunkIndexOutOfRange { index: u32, count: u32 },
     #[error("duplicate chunk index {index}")]
@@ -34,6 +45,8 @@ pub enum RehydrationError {
     AssetVersionMismatch,
     #[error("unsupported compression {compression:?}")]
     UnsupportedCompression { compression: Compression },
+    #[error("decompression failed: {message}")]
+    DecompressionFailed { message: String },
     #[error("decode failed: {message}")]
     DecodeFailed { message: String },
     #[error("canonical bytes mismatch after decode")]
@@ -136,7 +149,16 @@ pub fn reassemble_asset(
         let compression = Compression::try_from(chunk.compression).unwrap_or(Compression::Unknown);
         match compression {
             Compression::None => payload.extend_from_slice(&chunk.payload),
-            Compression::Zstd | Compression::Unknown => {
+            Compression::Zstd => {
+                let decoded =
+                    zstd::stream::decode_all(chunk.payload.as_slice()).map_err(|err| {
+                        RehydrationError::DecompressionFailed {
+                            message: err.to_string(),
+                        }
+                    })?;
+                payload.extend_from_slice(&decoded);
+            }
+            Compression::Unknown => {
                 return Err(RehydrationError::UnsupportedCompression { compression });
             }
         }
@@ -145,211 +167,115 @@ pub fn reassemble_asset(
     Ok(payload)
 }
 
-pub fn decode_morphology(bytes: &[u8]) -> Result<MorphologySet, RehydrationError> {
-    let mut cursor = Cursor::new(bytes);
-    let version = cursor.take_u32()?;
-    let neuron_count = cursor.take_u32()?;
-    let mut neurons = Vec::with_capacity(neuron_count as usize);
-    for _ in 0..neuron_count {
-        let neuron_id = cursor.take_u32()?;
-        let comp_count = cursor.take_u32()?;
-        let mut compartments = Vec::with_capacity(comp_count as usize);
-        for _ in 0..comp_count {
-            let comp_id = cursor.take_u32()?;
-            let has_parent = cursor.take_u8()?;
-            let parent = match has_parent {
-                0 => None,
-                1 => Some(cursor.take_u32()?),
-                _ => {
-                    return Err(RehydrationError::DecodeFailed {
-                        message: "invalid parent flag".to_string(),
-                    })
-                }
-            };
-            let kind = match cursor.take_u8()? {
-                0 => biophys_assets::CompartmentKind::Soma,
-                1 => biophys_assets::CompartmentKind::Dendrite,
-                2 => biophys_assets::CompartmentKind::Axon,
-                other => {
-                    return Err(RehydrationError::DecodeFailed {
-                        message: format!("invalid compartment kind {other}"),
-                    })
-                }
-            };
-            let length_um = cursor.take_u16()?;
-            let diameter_um = cursor.take_u16()?;
-            compartments.push(biophys_assets::Compartment {
-                comp_id,
-                parent,
-                kind,
-                length_um,
-                diameter_um,
-            });
-        }
-        let mut labels = Vec::new();
-        if version >= 2 {
-            let label_count = cursor.take_u32()?;
-            if label_count as usize > biophys_assets::MAX_LABELS_PER_NEURON {
-                return Err(RehydrationError::DecodeFailed {
-                    message: format!(
-                        "label count {} exceeds max {}",
-                        label_count,
-                        biophys_assets::MAX_LABELS_PER_NEURON
-                    ),
-                });
-            }
-            for _ in 0..label_count {
-                let key_len = cursor.take_u16()? as usize;
-                if key_len > biophys_assets::MAX_LABEL_KEY_LEN {
-                    return Err(RehydrationError::DecodeFailed {
-                        message: format!("label key too long: {key_len}"),
-                    });
-                }
-                let key_bytes = cursor.take_exact(key_len)?;
-                let key = String::from_utf8(key_bytes.to_vec()).map_err(|_| {
-                    RehydrationError::DecodeFailed {
-                        message: "invalid label key utf8".to_string(),
-                    }
-                })?;
-
-                let value_len = cursor.take_u16()? as usize;
-                if value_len > biophys_assets::MAX_LABEL_VALUE_LEN {
-                    return Err(RehydrationError::DecodeFailed {
-                        message: format!("label value too long: {value_len}"),
-                    });
-                }
-                let value_bytes = cursor.take_exact(value_len)?;
-                let value = String::from_utf8(value_bytes.to_vec()).map_err(|_| {
-                    RehydrationError::DecodeFailed {
-                        message: "invalid label value utf8".to_string(),
-                    }
-                })?;
-                labels.push(biophys_assets::LabelKV { k: key, v: value });
-            }
-        }
-        neurons.push(biophys_assets::MorphNeuron {
-            neuron_id,
-            compartments,
-            labels,
-        });
-    }
-    cursor.ensure_consumed()?;
-    let morph = MorphologySet { version, neurons };
-    if morph.to_canonical_bytes() != bytes {
-        return Err(RehydrationError::CanonicalMismatch);
-    }
-    Ok(morph)
+pub fn load_morphology_payload(
+    bundle: &AssetBundle,
+) -> Result<MorphologySetPayload, RehydrationError> {
+    let manifest = bundle
+        .manifest
+        .as_ref()
+        .ok_or(RehydrationError::MissingManifest)?;
+    let digest = manifest_digest_for_kind(manifest, AssetKind::MorphologySet)?;
+    let bytes = reassemble_asset(bundle, AssetKind::MorphologySet, digest)?;
+    decode_morphology(&bytes)
 }
 
-pub fn decode_channel_params(bytes: &[u8]) -> Result<ChannelParamsSet, RehydrationError> {
-    let mut cursor = Cursor::new(bytes);
-    let version = cursor.take_u32()?;
-    let param_count = cursor.take_u32()?;
-    let mut per_compartment = Vec::with_capacity(param_count as usize);
-    for _ in 0..param_count {
-        let neuron_id = cursor.take_u32()?;
-        let comp_id = cursor.take_u32()?;
-        let leak_g = cursor.take_u16()?;
-        let na_g = cursor.take_u16()?;
-        let k_g = cursor.take_u16()?;
-        per_compartment.push(biophys_assets::ChannelParams {
-            neuron_id,
-            comp_id,
-            leak_g,
-            na_g,
-            k_g,
-        });
-    }
-    cursor.ensure_consumed()?;
-    let params = ChannelParamsSet {
-        version,
-        per_compartment,
-    };
-    if params.to_canonical_bytes() != bytes {
-        return Err(RehydrationError::CanonicalMismatch);
-    }
-    Ok(params)
+pub fn load_channel_params_payload(
+    bundle: &AssetBundle,
+) -> Result<ChannelParamsSetPayload, RehydrationError> {
+    let manifest = bundle
+        .manifest
+        .as_ref()
+        .ok_or(RehydrationError::MissingManifest)?;
+    let digest = manifest_digest_for_kind(manifest, AssetKind::ChannelParamsSet)?;
+    let bytes = reassemble_asset(bundle, AssetKind::ChannelParamsSet, digest)?;
+    decode_channel_params(&bytes)
 }
 
-pub fn decode_synapse_params(bytes: &[u8]) -> Result<SynapseParamsSet, RehydrationError> {
-    let mut cursor = Cursor::new(bytes);
-    let version = cursor.take_u32()?;
-    let param_count = cursor.take_u32()?;
-    let mut params = Vec::with_capacity(param_count as usize);
-    for _ in 0..param_count {
-        let syn_type = match cursor.take_u8()? {
-            0 => biophys_assets::SynType::Exc,
-            1 => biophys_assets::SynType::Inh,
-            other => {
-                return Err(RehydrationError::DecodeFailed {
-                    message: format!("invalid synapse type {other}"),
-                })
-            }
-        };
-        let weight_base = cursor.take_i32()?;
-        let stp_u = cursor.take_u16()?;
-        let tau_rec = cursor.take_u16()?;
-        let tau_fac = cursor.take_u16()?;
-        let mod_channel = match cursor.take_u8()? {
-            0 => biophys_assets::ModChannel::None,
-            1 => biophys_assets::ModChannel::A,
-            2 => biophys_assets::ModChannel::B,
-            other => {
-                return Err(RehydrationError::DecodeFailed {
-                    message: format!("invalid mod channel {other}"),
-                })
-            }
-        };
-        params.push(biophys_assets::SynapseParams {
-            syn_type,
-            weight_base,
-            stp_u,
-            tau_rec,
-            tau_fac,
-            mod_channel,
-        });
-    }
-    cursor.ensure_consumed()?;
-    let params = SynapseParamsSet { version, params };
-    if params.to_canonical_bytes() != bytes {
-        return Err(RehydrationError::CanonicalMismatch);
-    }
-    Ok(params)
+pub fn load_synapse_params_payload(
+    bundle: &AssetBundle,
+) -> Result<SynapseParamsSetPayload, RehydrationError> {
+    let manifest = bundle
+        .manifest
+        .as_ref()
+        .ok_or(RehydrationError::MissingManifest)?;
+    let digest = manifest_digest_for_kind(manifest, AssetKind::SynapseParamsSet)?;
+    let bytes = reassemble_asset(bundle, AssetKind::SynapseParamsSet, digest)?;
+    decode_synapse_params(&bytes)
 }
 
-pub fn decode_connectivity(bytes: &[u8]) -> Result<ConnectivityGraph, RehydrationError> {
-    let mut cursor = Cursor::new(bytes);
-    let version = cursor.take_u32()?;
-    let edge_count = cursor.take_u32()?;
-    let mut edges = Vec::with_capacity(edge_count as usize);
-    for _ in 0..edge_count {
-        let pre = cursor.take_u32()?;
-        let post = cursor.take_u32()?;
-        let syn_type = match cursor.take_u8()? {
-            0 => biophys_assets::SynType::Exc,
-            1 => biophys_assets::SynType::Inh,
-            other => {
-                return Err(RehydrationError::DecodeFailed {
-                    message: format!("invalid synapse type {other}"),
-                })
-            }
-        };
-        let delay_steps = cursor.take_u16()?;
-        let syn_param_id = cursor.take_u32()?;
-        edges.push(biophys_assets::ConnEdge {
-            pre,
-            post,
-            syn_type,
-            delay_steps,
-            syn_param_id,
-        });
-    }
-    cursor.ensure_consumed()?;
-    let graph = ConnectivityGraph { version, edges };
-    if graph.to_canonical_bytes() != bytes {
+pub fn load_connectivity_payload(
+    bundle: &AssetBundle,
+) -> Result<ConnectivityGraphPayload, RehydrationError> {
+    let manifest = bundle
+        .manifest
+        .as_ref()
+        .ok_or(RehydrationError::MissingManifest)?;
+    let digest = manifest_digest_for_kind(manifest, AssetKind::ConnectivityGraph)?;
+    let bytes = reassemble_asset(bundle, AssetKind::ConnectivityGraph, digest)?;
+    decode_connectivity(&bytes)
+}
+
+pub fn decode_morphology(bytes: &[u8]) -> Result<MorphologySetPayload, RehydrationError> {
+    let mut payload =
+        MorphologySetPayload::decode(bytes).map_err(|err| RehydrationError::DecodeFailed {
+            message: err.to_string(),
+        })?;
+    normalize_payload_morphology(&mut payload);
+    if payload.encode_to_vec() != bytes {
         return Err(RehydrationError::CanonicalMismatch);
     }
-    Ok(graph)
+    morphology_from_payload(&payload)
+        .map_err(|message| RehydrationError::DecodeFailed { message })?;
+    Ok(payload)
+}
+
+pub fn decode_channel_params(bytes: &[u8]) -> Result<ChannelParamsSetPayload, RehydrationError> {
+    let mut payload =
+        ChannelParamsSetPayload::decode(bytes).map_err(|err| RehydrationError::DecodeFailed {
+            message: err.to_string(),
+        })?;
+    normalize_payload_channel_params(&mut payload);
+    if payload.encode_to_vec() != bytes {
+        return Err(RehydrationError::CanonicalMismatch);
+    }
+    channel_params_from_payload(&payload)
+        .map_err(|message| RehydrationError::DecodeFailed { message })?;
+    Ok(payload)
+}
+
+pub fn decode_synapse_params(bytes: &[u8]) -> Result<SynapseParamsSetPayload, RehydrationError> {
+    let mut payload =
+        SynapseParamsSetPayload::decode(bytes).map_err(|err| RehydrationError::DecodeFailed {
+            message: err.to_string(),
+        })?;
+    normalize_payload_synapse_params(&mut payload);
+    if payload.encode_to_vec() != bytes {
+        return Err(RehydrationError::CanonicalMismatch);
+    }
+    synapse_params_from_payload(&payload)
+        .map_err(|message| RehydrationError::DecodeFailed { message })?;
+    Ok(payload)
+}
+
+pub fn decode_connectivity(bytes: &[u8]) -> Result<ConnectivityGraphPayload, RehydrationError> {
+    let mut payload =
+        ConnectivityGraphPayload::decode(bytes).map_err(|err| RehydrationError::DecodeFailed {
+            message: err.to_string(),
+        })?;
+    normalize_payload_connectivity(&mut payload);
+    if payload.encode_to_vec() != bytes {
+        return Err(RehydrationError::CanonicalMismatch);
+    }
+    if payload.edges.len() > MAX_EDGES {
+        return Err(RehydrationError::DecodeFailed {
+            message: format!(
+                "edge count {} exceeds max {}",
+                payload.edges.len(),
+                MAX_EDGES
+            ),
+        });
+    }
+    Ok(payload)
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -373,25 +299,31 @@ impl AssetRehydrator {
         reassemble_asset(bundle, asset_kind, asset_digest)
     }
 
-    pub fn decode_morphology(&self, bytes: &[u8]) -> Result<MorphologySet, RehydrationError> {
+    pub fn decode_morphology(
+        &self,
+        bytes: &[u8],
+    ) -> Result<MorphologySetPayload, RehydrationError> {
         decode_morphology(bytes)
     }
 
     pub fn decode_channel_params(
         &self,
         bytes: &[u8],
-    ) -> Result<ChannelParamsSet, RehydrationError> {
+    ) -> Result<ChannelParamsSetPayload, RehydrationError> {
         decode_channel_params(bytes)
     }
 
     pub fn decode_synapse_params(
         &self,
         bytes: &[u8],
-    ) -> Result<SynapseParamsSet, RehydrationError> {
+    ) -> Result<SynapseParamsSetPayload, RehydrationError> {
         decode_synapse_params(bytes)
     }
 
-    pub fn decode_connectivity(&self, bytes: &[u8]) -> Result<ConnectivityGraph, RehydrationError> {
+    pub fn decode_connectivity(
+        &self,
+        bytes: &[u8],
+    ) -> Result<ConnectivityGraphPayload, RehydrationError> {
         decode_connectivity(bytes)
     }
 }
@@ -447,65 +379,16 @@ fn digest_from_vec(bytes: &[u8], label: &'static str) -> Result<[u8; 32], Rehydr
     Ok(out)
 }
 
-struct Cursor<'a> {
-    bytes: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> Cursor<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, offset: 0 }
-    }
-
-    fn ensure_consumed(&self) -> Result<(), RehydrationError> {
-        if self.offset == self.bytes.len() {
-            Ok(())
-        } else {
-            Err(RehydrationError::DecodeFailed {
-                message: format!(
-                    "trailing bytes: {} remaining",
-                    self.bytes.len().saturating_sub(self.offset)
-                ),
-            })
-        }
-    }
-
-    fn take_u8(&mut self) -> Result<u8, RehydrationError> {
-        if self.offset + 1 > self.bytes.len() {
-            return Err(RehydrationError::DecodeFailed {
-                message: "unexpected end of bytes".to_string(),
-            });
-        }
-        let value = self.bytes[self.offset];
-        self.offset += 1;
-        Ok(value)
-    }
-
-    fn take_u16(&mut self) -> Result<u16, RehydrationError> {
-        let bytes = self.take_exact(2)?;
-        Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
-    }
-
-    fn take_u32(&mut self) -> Result<u32, RehydrationError> {
-        let bytes = self.take_exact(4)?;
-        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-    }
-
-    fn take_i32(&mut self) -> Result<i32, RehydrationError> {
-        let bytes = self.take_exact(4)?;
-        Ok(i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-    }
-
-    fn take_exact(&mut self, len: usize) -> Result<&'a [u8], RehydrationError> {
-        if self.offset + len > self.bytes.len() {
-            return Err(RehydrationError::DecodeFailed {
-                message: "unexpected end of bytes".to_string(),
-            });
-        }
-        let start = self.offset;
-        self.offset += len;
-        Ok(&self.bytes[start..start + len])
-    }
+fn manifest_digest_for_kind(
+    manifest: &AssetManifest,
+    kind: AssetKind,
+) -> Result<[u8; 32], RehydrationError> {
+    let component = manifest
+        .components
+        .iter()
+        .find(|component| component.kind == kind as i32)
+        .ok_or(RehydrationError::MissingAssetDigest { kind })?;
+    digest_from_vec(&component.digest, "asset_digest")
 }
 
 #[cfg(test)]
@@ -515,7 +398,10 @@ mod tests {
         build_asset_bundle_with_policy, chunk_asset, BundleIdPolicy, ChunkerConfig,
     };
     use biophys_assets::{
-        demo_connectivity, demo_morphology_3comp, demo_syn_params, to_asset_digest,
+        channel_params_from_payload, channel_params_payload_bytes, connectivity_from_payload,
+        connectivity_payload_bytes, demo_connectivity, demo_morphology_3comp, demo_syn_params,
+        morphology_from_payload, morphology_payload_bytes, synapse_params_from_payload,
+        synapse_params_payload_bytes, to_asset_digest,
     };
     use biophys_core::{
         LifParams, LifState, ModChannel, NeuronId, StpParams, StpState, SynapseEdge, STP_SCALE,
@@ -526,11 +412,16 @@ mod tests {
 
     fn build_bundle() -> AssetBundle {
         let morph = demo_morphology_3comp(3);
+        let channel = biophys_assets::demo_channel_params(&morph);
         let syn = demo_syn_params();
         let connectivity = demo_connectivity(3, &syn);
         let morph_bytes = morph.to_canonical_bytes();
+        let channel_bytes = channel.to_canonical_bytes();
+        let syn_bytes = syn.to_canonical_bytes();
         let connectivity_bytes = connectivity.to_canonical_bytes();
         let morph_digest = morph.digest();
+        let channel_digest = channel.digest();
+        let syn_digest = syn.digest();
         let conn_digest = connectivity.digest();
 
         let created_at_ms = 10;
@@ -540,8 +431,34 @@ mod tests {
             created_at_ms,
             manifest_digest: vec![0u8; 32],
             components: vec![
-                to_asset_digest(AssetKind::Morphology, 1, morph_digest, created_at_ms, None),
-                to_asset_digest(AssetKind::Connectivity, 1, conn_digest, created_at_ms, None),
+                to_asset_digest(
+                    AssetKind::MorphologySet,
+                    1,
+                    morph_digest,
+                    created_at_ms,
+                    None,
+                ),
+                to_asset_digest(
+                    AssetKind::ChannelParamsSet,
+                    1,
+                    channel_digest,
+                    created_at_ms,
+                    None,
+                ),
+                to_asset_digest(
+                    AssetKind::SynapseParamsSet,
+                    1,
+                    syn_digest,
+                    created_at_ms,
+                    None,
+                ),
+                to_asset_digest(
+                    AssetKind::ConnectivityGraph,
+                    1,
+                    conn_digest,
+                    created_at_ms,
+                    None,
+                ),
             ],
         };
         let manifest_digest = compute_manifest_digest(&manifest);
@@ -556,7 +473,7 @@ mod tests {
         let mut chunks = Vec::new();
         chunks.extend(
             chunk_asset(
-                AssetKind::Morphology,
+                AssetKind::MorphologySet,
                 1,
                 morph_digest,
                 &morph_bytes,
@@ -567,7 +484,29 @@ mod tests {
         );
         chunks.extend(
             chunk_asset(
-                AssetKind::Connectivity,
+                AssetKind::ChannelParamsSet,
+                1,
+                channel_digest,
+                &channel_bytes,
+                &chunker,
+                created_at_ms,
+            )
+            .expect("channel chunks"),
+        );
+        chunks.extend(
+            chunk_asset(
+                AssetKind::SynapseParamsSet,
+                1,
+                syn_digest,
+                &syn_bytes,
+                &chunker,
+                created_at_ms,
+            )
+            .expect("syn chunks"),
+        );
+        chunks.extend(
+            chunk_asset(
+                AssetKind::ConnectivityGraph,
                 1,
                 conn_digest,
                 &connectivity_bytes,
@@ -608,8 +547,27 @@ mod tests {
         let bundle = build_bundle();
         let morph = demo_morphology_3comp(3);
         let bytes =
-            reassemble_asset(&bundle, AssetKind::Morphology, morph.digest()).expect("rehydrate");
+            reassemble_asset(&bundle, AssetKind::MorphologySet, morph.digest()).expect("rehydrate");
         assert_eq!(bytes, morph.to_canonical_bytes());
+    }
+
+    #[test]
+    fn load_payloads_roundtrip_ok() {
+        let bundle = build_bundle();
+        let morph_payload = load_morphology_payload(&bundle).expect("morph payload");
+        let channel_payload = load_channel_params_payload(&bundle).expect("channel payload");
+        let syn_payload = load_synapse_params_payload(&bundle).expect("syn payload");
+        let conn_payload = load_connectivity_payload(&bundle).expect("conn payload");
+
+        let morph = morphology_from_payload(&morph_payload).expect("morph conversion");
+        let channel = channel_params_from_payload(&channel_payload).expect("channel conversion");
+        let syn = synapse_params_from_payload(&syn_payload).expect("syn conversion");
+        let conn = connectivity_from_payload(&conn_payload, &syn_payload).expect("conn conversion");
+
+        assert_eq!(morph, demo_morphology_3comp(3));
+        assert_eq!(channel, biophys_assets::demo_channel_params(&morph));
+        assert_eq!(syn, demo_syn_params());
+        assert_eq!(conn, demo_connectivity(3, &syn));
     }
 
     #[test]
@@ -617,23 +575,32 @@ mod tests {
         let morph = demo_morphology_3comp(2);
         let bytes = morph.to_canonical_bytes();
         let decoded = decode_morphology(&bytes).expect("decode");
-        assert_eq!(decoded, morph);
+        assert_eq!(morphology_payload_bytes(&decoded), bytes);
+        let roundtrip = morphology_from_payload(&decoded).expect("morph payload");
+        assert_eq!(roundtrip, morph);
 
         let channel = biophys_assets::demo_channel_params(&morph);
         let bytes = channel.to_canonical_bytes();
         let decoded = decode_channel_params(&bytes).expect("decode channel");
-        assert_eq!(decoded, channel);
+        assert_eq!(channel_params_payload_bytes(&decoded), bytes);
+        let roundtrip = channel_params_from_payload(&decoded).expect("channel payload");
+        assert_eq!(roundtrip, channel);
 
         let syn = demo_syn_params();
         let bytes = syn.to_canonical_bytes();
         let decoded = decode_synapse_params(&bytes).expect("decode syn");
-        assert_eq!(decoded, syn);
+        assert_eq!(synapse_params_payload_bytes(&decoded), bytes);
+        let roundtrip = synapse_params_from_payload(&decoded).expect("syn payload");
+        assert_eq!(roundtrip, syn);
 
         let syn = demo_syn_params();
         let connectivity = demo_connectivity(2, &syn);
         let bytes = connectivity.to_canonical_bytes();
         let decoded = decode_connectivity(&bytes).expect("decode");
-        assert_eq!(decoded, connectivity);
+        assert_eq!(connectivity_payload_bytes(&decoded), bytes);
+        let syn_payload = decode_synapse_params(&syn.to_canonical_bytes()).expect("syn payload");
+        let roundtrip = connectivity_from_payload(&decoded, &syn_payload).expect("conn payload");
+        assert_eq!(roundtrip, connectivity);
     }
 
     #[test]
@@ -647,14 +614,23 @@ mod tests {
         verify_asset_bundle(&bundle).expect("verify");
 
         let morph_digest = demo_morphology_3comp(3).digest();
-        let conn_digest = demo_connectivity(3, &demo_syn_params()).digest();
+        let syn = demo_syn_params();
+        let syn_digest = syn.digest();
+        let conn_digest = demo_connectivity(3, &syn).digest();
         let morph_bytes =
-            reassemble_asset(&bundle, AssetKind::Morphology, morph_digest).expect("morph bytes");
-        let conn_bytes =
-            reassemble_asset(&bundle, AssetKind::Connectivity, conn_digest).expect("conn bytes");
+            reassemble_asset(&bundle, AssetKind::MorphologySet, morph_digest).expect("morph bytes");
+        let syn_bytes =
+            reassemble_asset(&bundle, AssetKind::SynapseParamsSet, syn_digest).expect("syn bytes");
+        let conn_bytes = reassemble_asset(&bundle, AssetKind::ConnectivityGraph, conn_digest)
+            .expect("conn bytes");
 
-        let morph = decode_morphology(&morph_bytes).expect("decode morph");
-        let conn = decode_connectivity(&conn_bytes).expect("decode conn");
+        let morph_payload = decode_morphology(&morph_bytes).expect("decode morph");
+        let conn_payload = decode_connectivity(&conn_bytes).expect("decode conn");
+        let syn_payload = decode_synapse_params(&syn_bytes).expect("decode syn");
+
+        let morph = morphology_from_payload(&morph_payload).expect("morph payload");
+        let conn =
+            connectivity_from_payload(&conn_payload, &syn_payload).expect("connectivity payload");
 
         let neuron_count = morph.neurons.len();
         let params = vec![
@@ -702,5 +678,50 @@ mod tests {
             BiophysRuntime::new_with_synapses(params, states, 1, 16, edges, stp_params, 1024);
         assert_eq!(runtime.params.len(), neuron_count);
         assert_eq!(runtime.edges.len(), 3);
+    }
+
+    #[test]
+    fn boundedness_rejects_payload_sizes() {
+        let mut morph_payload = MorphologySetPayload {
+            version: 1,
+            neurons: vec![
+                ucf::v1::MorphNeuronPayload {
+                    neuron_id: 0,
+                    compartments: vec![ucf::v1::CompartmentPayload {
+                        comp_id: 0,
+                        parent: None,
+                        kind: ucf::v1::CompartmentKind::Soma as i32,
+                        length_um: 10,
+                        diameter_um: 8,
+                    }],
+                    labels: Vec::new(),
+                };
+                biophys_assets::MAX_NEURONS + 1
+            ],
+        };
+        morph_payload
+            .neurons
+            .iter_mut()
+            .enumerate()
+            .for_each(|(idx, neuron)| neuron.neuron_id = idx as u32);
+        let bytes = morph_payload.encode_to_vec();
+        let err = decode_morphology(&bytes).expect_err("expected morph bounds error");
+        assert!(matches!(err, RehydrationError::DecodeFailed { .. }));
+
+        let conn_payload = ConnectivityGraphPayload {
+            version: 1,
+            edges: (0..(MAX_EDGES as u32 + 1))
+                .map(|_idx| ucf::v1::ConnectivityEdgePayload {
+                    pre: 0,
+                    post: 0,
+                    post_compartment: 0,
+                    syn_param_id: 0,
+                    delay_steps: 1,
+                })
+                .collect(),
+        };
+        let bytes = conn_payload.encode_to_vec();
+        let err = decode_connectivity(&bytes).expect_err("expected conn bounds error");
+        assert!(matches!(err, RehydrationError::DecodeFailed { .. }));
     }
 }

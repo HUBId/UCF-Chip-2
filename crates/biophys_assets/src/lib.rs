@@ -1,7 +1,17 @@
 #![forbid(unsafe_code)]
 
+use prost::Message;
+use ucf::v1::{
+    ChannelParamsPayload, ChannelParamsSetPayload, CompartmentKind as PayloadCompartmentKind,
+    CompartmentPayload, ConnectivityEdgePayload, ConnectivityGraphPayload, LabelKv,
+    ModChannel as PayloadModChannel, MorphNeuronPayload, MorphologySetPayload,
+    SynapseParamsPayload, SynapseParamsSetPayload, SynapseType as PayloadSynapseType,
+};
+
 const MAX_COMPARTMENTS_PER_NEURON: usize = 64;
 const MAX_EDGES_PER_NEURON: usize = 64;
+pub const MAX_NEURONS: usize = 4096;
+pub const MAX_EDGES: usize = MAX_NEURONS * MAX_EDGES_PER_NEURON;
 pub const MAX_LABELS_PER_NEURON: usize = 8;
 pub const MAX_LABEL_KEY_LEN: usize = 32;
 pub const MAX_LABEL_VALUE_LEN: usize = 64;
@@ -271,67 +281,433 @@ pub fn demo_connectivity(neurons: u32, syn_params: &SynapseParamsSet) -> Connect
     ConnectivityGraph { version: 1, edges }
 }
 
-impl MorphologySet {
-    pub fn to_canonical_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        push_u32(&mut bytes, self.version);
-        let mut neurons = self.neurons.clone();
-        neurons.sort_by_key(|n| n.neuron_id);
-        push_u32(&mut bytes, neurons.len() as u32);
-        for neuron in neurons {
-            push_u32(&mut bytes, neuron.neuron_id);
-            let mut compartments = neuron.compartments.clone();
-            compartments.sort_by_key(|c| c.comp_id);
-            push_u32(&mut bytes, compartments.len() as u32);
-            for comp in compartments {
-                push_u32(&mut bytes, comp.comp_id);
-                match comp.parent {
-                    Some(parent) => {
-                        push_u8(&mut bytes, 1);
-                        push_u32(&mut bytes, parent);
-                    }
-                    None => push_u8(&mut bytes, 0),
-                }
-                push_u8(&mut bytes, comp.kind as u8);
-                push_u16(&mut bytes, comp.length_um);
-                push_u16(&mut bytes, comp.diameter_um);
-            }
-            if self.version >= 2 {
-                let mut labels = neuron.labels.clone();
-                labels.sort_by(|a, b| {
-                    (a.k.as_str(), a.v.as_str()).cmp(&(b.k.as_str(), b.v.as_str()))
-                });
-                assert!(
-                    labels.len() <= MAX_LABELS_PER_NEURON,
-                    "label count {} exceeds max {}",
-                    labels.len(),
-                    MAX_LABELS_PER_NEURON
-                );
-                push_u32(&mut bytes, labels.len() as u32);
-                for label in labels {
-                    assert!(
-                        label.k.len() <= MAX_LABEL_KEY_LEN,
-                        "label key too long: {}",
-                        label.k.len()
-                    );
-                    assert!(
-                        label.v.len() <= MAX_LABEL_VALUE_LEN,
-                        "label value too long: {}",
-                        label.v.len()
-                    );
-                    push_u16(&mut bytes, label.k.len() as u16);
-                    bytes.extend_from_slice(label.k.as_bytes());
-                    push_u16(&mut bytes, label.v.len() as u16);
-                    bytes.extend_from_slice(label.v.as_bytes());
-                }
-            } else {
+pub fn build_morphology_payload(morph: &MorphologySet) -> MorphologySetPayload {
+    let neurons = morph
+        .neurons
+        .iter()
+        .map(|neuron| {
+            if morph.version < 2 {
                 debug_assert!(
                     neuron.labels.is_empty(),
                     "labels require morphology version >= 2"
                 );
             }
+            debug_assert!(
+                neuron.compartments.len() <= MAX_COMPARTMENTS_PER_NEURON,
+                "compartment count {} exceeds max {}",
+                neuron.compartments.len(),
+                MAX_COMPARTMENTS_PER_NEURON
+            );
+            debug_assert!(
+                neuron.labels.len() <= MAX_LABELS_PER_NEURON,
+                "label count {} exceeds max {}",
+                neuron.labels.len(),
+                MAX_LABELS_PER_NEURON
+            );
+            let compartments = neuron
+                .compartments
+                .iter()
+                .map(|comp| CompartmentPayload {
+                    comp_id: comp.comp_id,
+                    parent: comp.parent,
+                    kind: match comp.kind {
+                        CompartmentKind::Soma => PayloadCompartmentKind::Soma as i32,
+                        CompartmentKind::Dendrite => PayloadCompartmentKind::Dendrite as i32,
+                        CompartmentKind::Axon => PayloadCompartmentKind::Axon as i32,
+                    },
+                    length_um: comp.length_um as u32,
+                    diameter_um: comp.diameter_um as u32,
+                })
+                .collect();
+            let labels = neuron
+                .labels
+                .iter()
+                .map(|label| {
+                    debug_assert!(
+                        label.k.len() <= MAX_LABEL_KEY_LEN,
+                        "label key too long: {}",
+                        label.k.len()
+                    );
+                    debug_assert!(
+                        label.v.len() <= MAX_LABEL_VALUE_LEN,
+                        "label value too long: {}",
+                        label.v.len()
+                    );
+                    LabelKv {
+                        k: label.k.clone(),
+                        v: label.v.clone(),
+                    }
+                })
+                .collect();
+            MorphNeuronPayload {
+                neuron_id: neuron.neuron_id,
+                compartments,
+                labels,
+            }
+        })
+        .collect();
+    let mut payload = MorphologySetPayload {
+        version: morph.version,
+        neurons,
+    };
+    normalize_payload_morphology(&mut payload);
+    payload
+}
+
+pub fn build_channel_params_payload(params: &ChannelParamsSet) -> ChannelParamsSetPayload {
+    let entries = params
+        .per_compartment
+        .iter()
+        .map(|param| ChannelParamsPayload {
+            neuron_id: param.neuron_id,
+            comp_id: param.comp_id,
+            leak_g: param.leak_g as u32,
+            na_g: param.na_g as u32,
+            k_g: param.k_g as u32,
+        })
+        .collect();
+    let mut payload = ChannelParamsSetPayload {
+        version: params.version,
+        params: entries,
+    };
+    normalize_payload_channel_params(&mut payload);
+    payload
+}
+
+pub fn build_synapse_params_payload(params: &SynapseParamsSet) -> SynapseParamsSetPayload {
+    let entries = params
+        .params
+        .iter()
+        .enumerate()
+        .map(|(idx, param)| SynapseParamsPayload {
+            syn_param_id: idx as u32,
+            syn_type: match param.syn_type {
+                SynType::Exc => PayloadSynapseType::Exc as i32,
+                SynType::Inh => PayloadSynapseType::Inh as i32,
+            },
+            weight_base: param.weight_base,
+            stp_u: param.stp_u as u32,
+            tau_rec: param.tau_rec as u32,
+            tau_fac: param.tau_fac as u32,
+            mod_channel: match param.mod_channel {
+                ModChannel::None => PayloadModChannel::None as i32,
+                ModChannel::A => PayloadModChannel::A as i32,
+                ModChannel::B => PayloadModChannel::B as i32,
+            },
+        })
+        .collect();
+    let mut payload = SynapseParamsSetPayload {
+        version: params.version,
+        params: entries,
+    };
+    normalize_payload_synapse_params(&mut payload);
+    payload
+}
+
+pub fn build_connectivity_payload(graph: &ConnectivityGraph) -> ConnectivityGraphPayload {
+    debug_assert!(
+        graph.edges.len() <= MAX_EDGES,
+        "edge count {} exceeds max {}",
+        graph.edges.len(),
+        MAX_EDGES
+    );
+    let edges = graph
+        .edges
+        .iter()
+        .map(|edge| ConnectivityEdgePayload {
+            pre: edge.pre,
+            post: edge.post,
+            post_compartment: 0,
+            syn_param_id: edge.syn_param_id,
+            delay_steps: edge.delay_steps as u32,
+        })
+        .collect();
+    let mut payload = ConnectivityGraphPayload {
+        version: graph.version,
+        edges,
+    };
+    normalize_payload_connectivity(&mut payload);
+    payload
+}
+
+pub fn normalize_payload_morphology(payload: &mut MorphologySetPayload) {
+    payload.neurons.sort_by_key(|neuron| neuron.neuron_id);
+    for neuron in &mut payload.neurons {
+        neuron.compartments.sort_by_key(|comp| comp.comp_id);
+        neuron
+            .labels
+            .sort_by(|a, b| (a.k.as_str(), a.v.as_str()).cmp(&(b.k.as_str(), b.v.as_str())));
+    }
+}
+
+pub fn normalize_payload_channel_params(payload: &mut ChannelParamsSetPayload) {
+    payload
+        .params
+        .sort_by_key(|param| (param.neuron_id, param.comp_id));
+}
+
+pub fn normalize_payload_synapse_params(payload: &mut SynapseParamsSetPayload) {
+    payload.params.sort_by_key(|param| param.syn_param_id);
+}
+
+pub fn normalize_payload_connectivity(payload: &mut ConnectivityGraphPayload) {
+    payload.edges.sort_by_key(|edge| {
+        (
+            edge.pre,
+            edge.post,
+            edge.post_compartment,
+            edge.syn_param_id,
+            edge.delay_steps,
+        )
+    });
+}
+
+pub fn morphology_payload_bytes(payload: &MorphologySetPayload) -> Vec<u8> {
+    let mut normalized = payload.clone();
+    normalize_payload_morphology(&mut normalized);
+    normalized.encode_to_vec()
+}
+
+pub fn channel_params_payload_bytes(payload: &ChannelParamsSetPayload) -> Vec<u8> {
+    let mut normalized = payload.clone();
+    normalize_payload_channel_params(&mut normalized);
+    normalized.encode_to_vec()
+}
+
+pub fn synapse_params_payload_bytes(payload: &SynapseParamsSetPayload) -> Vec<u8> {
+    let mut normalized = payload.clone();
+    normalize_payload_synapse_params(&mut normalized);
+    normalized.encode_to_vec()
+}
+
+pub fn connectivity_payload_bytes(payload: &ConnectivityGraphPayload) -> Vec<u8> {
+    let mut normalized = payload.clone();
+    normalize_payload_connectivity(&mut normalized);
+    normalized.encode_to_vec()
+}
+
+pub fn morphology_payload_digest(payload: &MorphologySetPayload) -> [u8; 32] {
+    artifact_digest("UCF:ASSET:MORPH", &morphology_payload_bytes(payload))
+}
+
+pub fn channel_params_payload_digest(payload: &ChannelParamsSetPayload) -> [u8; 32] {
+    artifact_digest(
+        "UCF:ASSET:CHANNEL_PARAMS",
+        &channel_params_payload_bytes(payload),
+    )
+}
+
+pub fn synapse_params_payload_digest(payload: &SynapseParamsSetPayload) -> [u8; 32] {
+    artifact_digest(
+        "UCF:ASSET:SYN_PARAMS",
+        &synapse_params_payload_bytes(payload),
+    )
+}
+
+pub fn connectivity_payload_digest(payload: &ConnectivityGraphPayload) -> [u8; 32] {
+    artifact_digest(
+        "UCF:ASSET:CONNECTIVITY",
+        &connectivity_payload_bytes(payload),
+    )
+}
+
+pub fn morphology_from_payload(payload: &MorphologySetPayload) -> Result<MorphologySet, String> {
+    if payload.neurons.len() > MAX_NEURONS {
+        return Err(format!(
+            "neuron count {} exceeds max {}",
+            payload.neurons.len(),
+            MAX_NEURONS
+        ));
+    }
+    let mut neurons = Vec::with_capacity(payload.neurons.len());
+    for neuron in &payload.neurons {
+        if payload.version < 2 && !neuron.labels.is_empty() {
+            return Err("labels require morphology version >= 2".to_string());
         }
-        bytes
+        if neuron.compartments.len() > MAX_COMPARTMENTS_PER_NEURON {
+            return Err(format!(
+                "compartment count {} exceeds max {}",
+                neuron.compartments.len(),
+                MAX_COMPARTMENTS_PER_NEURON
+            ));
+        }
+        if neuron.labels.len() > MAX_LABELS_PER_NEURON {
+            return Err(format!(
+                "label count {} exceeds max {}",
+                neuron.labels.len(),
+                MAX_LABELS_PER_NEURON
+            ));
+        }
+        let mut compartments = Vec::with_capacity(neuron.compartments.len());
+        for comp in &neuron.compartments {
+            let kind = PayloadCompartmentKind::try_from(comp.kind)
+                .map_err(|_| format!("invalid compartment kind {}", comp.kind))?;
+            let length_um = u16_from_u32(comp.length_um, "length_um")?;
+            let diameter_um = u16_from_u32(comp.diameter_um, "diameter_um")?;
+            compartments.push(Compartment {
+                comp_id: comp.comp_id,
+                parent: comp.parent,
+                kind: match kind {
+                    PayloadCompartmentKind::Soma => CompartmentKind::Soma,
+                    PayloadCompartmentKind::Dendrite => CompartmentKind::Dendrite,
+                    PayloadCompartmentKind::Axon => CompartmentKind::Axon,
+                },
+                length_um,
+                diameter_um,
+            });
+        }
+        let mut labels = Vec::with_capacity(neuron.labels.len());
+        for label in &neuron.labels {
+            if label.k.len() > MAX_LABEL_KEY_LEN {
+                return Err(format!("label key too long: {}", label.k.len()));
+            }
+            if label.v.len() > MAX_LABEL_VALUE_LEN {
+                return Err(format!("label value too long: {}", label.v.len()));
+            }
+            labels.push(LabelKV {
+                k: label.k.clone(),
+                v: label.v.clone(),
+            });
+        }
+        neurons.push(MorphNeuron {
+            neuron_id: neuron.neuron_id,
+            compartments,
+            labels,
+        });
+    }
+    Ok(MorphologySet {
+        version: payload.version,
+        neurons,
+    })
+}
+
+pub fn channel_params_from_payload(
+    payload: &ChannelParamsSetPayload,
+) -> Result<ChannelParamsSet, String> {
+    let mut per_compartment = Vec::with_capacity(payload.params.len());
+    for param in &payload.params {
+        per_compartment.push(ChannelParams {
+            neuron_id: param.neuron_id,
+            comp_id: param.comp_id,
+            leak_g: u16_from_u32(param.leak_g, "leak_g")?,
+            na_g: u16_from_u32(param.na_g, "na_g")?,
+            k_g: u16_from_u32(param.k_g, "k_g")?,
+        });
+    }
+    Ok(ChannelParamsSet {
+        version: payload.version,
+        per_compartment,
+    })
+}
+
+pub fn synapse_params_from_payload(
+    payload: &SynapseParamsSetPayload,
+) -> Result<SynapseParamsSet, String> {
+    let mut entries = Vec::with_capacity(payload.params.len());
+    let mut seen = std::collections::BTreeSet::new();
+    for param in &payload.params {
+        if !seen.insert(param.syn_param_id) {
+            return Err(format!("duplicate syn_param_id {}", param.syn_param_id));
+        }
+        let syn_type = PayloadSynapseType::try_from(param.syn_type)
+            .map_err(|_| format!("invalid synapse type {}", param.syn_type))?;
+        let mod_channel = PayloadModChannel::try_from(param.mod_channel)
+            .map_err(|_| format!("invalid mod channel {}", param.mod_channel))?;
+        entries.push((
+            param.syn_param_id,
+            SynapseParams {
+                syn_type: match syn_type {
+                    PayloadSynapseType::Exc => SynType::Exc,
+                    PayloadSynapseType::Inh => SynType::Inh,
+                },
+                weight_base: param.weight_base,
+                stp_u: u16_from_u32(param.stp_u, "stp_u")?,
+                tau_rec: u16_from_u32(param.tau_rec, "tau_rec")?,
+                tau_fac: u16_from_u32(param.tau_fac, "tau_fac")?,
+                mod_channel: match mod_channel {
+                    PayloadModChannel::None => ModChannel::None,
+                    PayloadModChannel::A => ModChannel::A,
+                    PayloadModChannel::B => ModChannel::B,
+                },
+            },
+        ));
+    }
+    entries.sort_by_key(|(syn_param_id, _)| *syn_param_id);
+    for (idx, (syn_param_id, _)) in entries.iter().enumerate() {
+        if *syn_param_id != idx as u32 {
+            return Err("syn_param_id entries must be contiguous starting at 0".to_string());
+        }
+    }
+    let params = entries.into_iter().map(|(_, param)| param).collect();
+    Ok(SynapseParamsSet {
+        version: payload.version,
+        params,
+    })
+}
+
+pub fn connectivity_from_payload(
+    payload: &ConnectivityGraphPayload,
+    syn_payload: &SynapseParamsSetPayload,
+) -> Result<ConnectivityGraph, String> {
+    if payload.edges.len() > MAX_EDGES {
+        return Err(format!(
+            "edge count {} exceeds max {}",
+            payload.edges.len(),
+            MAX_EDGES
+        ));
+    }
+    let syn_map = synapse_type_map(syn_payload)?;
+    let mut edges = Vec::with_capacity(payload.edges.len());
+    for edge in &payload.edges {
+        if edge.post_compartment != 0 {
+            return Err(format!(
+                "post_compartment {} not supported",
+                edge.post_compartment
+            ));
+        }
+        let syn_type = syn_map
+            .get(&edge.syn_param_id)
+            .ok_or_else(|| format!("missing synapse params id {}", edge.syn_param_id))?;
+        edges.push(ConnEdge {
+            pre: edge.pre,
+            post: edge.post,
+            syn_type: *syn_type,
+            delay_steps: u16_from_u32(edge.delay_steps, "delay_steps")?,
+            syn_param_id: edge.syn_param_id,
+        });
+    }
+    Ok(ConnectivityGraph {
+        version: payload.version,
+        edges,
+    })
+}
+
+fn synapse_type_map(
+    payload: &SynapseParamsSetPayload,
+) -> Result<std::collections::BTreeMap<u32, SynType>, String> {
+    let mut map = std::collections::BTreeMap::new();
+    for param in &payload.params {
+        let syn_type = PayloadSynapseType::try_from(param.syn_type)
+            .map_err(|_| format!("invalid synapse type {}", param.syn_type))?;
+        let entry = match syn_type {
+            PayloadSynapseType::Exc => SynType::Exc,
+            PayloadSynapseType::Inh => SynType::Inh,
+        };
+        if map.insert(param.syn_param_id, entry).is_some() {
+            return Err(format!("duplicate syn_param_id {}", param.syn_param_id));
+        }
+    }
+    Ok(map)
+}
+
+fn u16_from_u32(value: u32, label: &str) -> Result<u16, String> {
+    u16::try_from(value).map_err(|_| format!("{label} value {value} exceeds u16 max"))
+}
+
+impl MorphologySet {
+    pub fn to_canonical_bytes(&self) -> Vec<u8> {
+        let payload = build_morphology_payload(self);
+        morphology_payload_bytes(&payload)
     }
 
     pub fn digest(&self) -> [u8; 32] {
@@ -341,19 +717,8 @@ impl MorphologySet {
 
 impl ChannelParamsSet {
     pub fn to_canonical_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        push_u32(&mut bytes, self.version);
-        let mut params = self.per_compartment.clone();
-        params.sort_by_key(|p| (p.neuron_id, p.comp_id));
-        push_u32(&mut bytes, params.len() as u32);
-        for param in params {
-            push_u32(&mut bytes, param.neuron_id);
-            push_u32(&mut bytes, param.comp_id);
-            push_u16(&mut bytes, param.leak_g);
-            push_u16(&mut bytes, param.na_g);
-            push_u16(&mut bytes, param.k_g);
-        }
-        bytes
+        let payload = build_channel_params_payload(self);
+        channel_params_payload_bytes(&payload)
     }
 
     pub fn digest(&self) -> [u8; 32] {
@@ -363,29 +728,8 @@ impl ChannelParamsSet {
 
 impl SynapseParamsSet {
     pub fn to_canonical_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        push_u32(&mut bytes, self.version);
-        let mut params = self.params.clone();
-        params.sort_by_key(|p| {
-            (
-                p.syn_type,
-                p.weight_base,
-                p.stp_u,
-                p.tau_rec,
-                p.tau_fac,
-                p.mod_channel,
-            )
-        });
-        push_u32(&mut bytes, params.len() as u32);
-        for param in params {
-            push_u8(&mut bytes, param.syn_type as u8);
-            push_i32(&mut bytes, param.weight_base);
-            push_u16(&mut bytes, param.stp_u);
-            push_u16(&mut bytes, param.tau_rec);
-            push_u16(&mut bytes, param.tau_fac);
-            push_u8(&mut bytes, param.mod_channel as u8);
-        }
-        bytes
+        let payload = build_synapse_params_payload(self);
+        synapse_params_payload_bytes(&payload)
     }
 
     pub fn digest(&self) -> [u8; 32] {
@@ -395,19 +739,8 @@ impl SynapseParamsSet {
 
 impl ConnectivityGraph {
     pub fn to_canonical_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        push_u32(&mut bytes, self.version);
-        let mut edges = self.edges.clone();
-        edges.sort_by_key(|e| (e.pre, e.post, e.syn_type, e.delay_steps, e.syn_param_id));
-        push_u32(&mut bytes, edges.len() as u32);
-        for edge in edges {
-            push_u32(&mut bytes, edge.pre);
-            push_u32(&mut bytes, edge.post);
-            push_u8(&mut bytes, edge.syn_type as u8);
-            push_u16(&mut bytes, edge.delay_steps);
-            push_u32(&mut bytes, edge.syn_param_id);
-        }
-        bytes
+        let payload = build_connectivity_payload(self);
+        connectivity_payload_bytes(&payload)
     }
 
     pub fn digest(&self) -> [u8; 32] {
@@ -432,23 +765,11 @@ impl AssetManifest {
     }
 }
 
-fn push_u8(bytes: &mut Vec<u8>, value: u8) {
-    bytes.push(value);
-}
-
-fn push_u16(bytes: &mut Vec<u8>, value: u16) {
-    bytes.extend_from_slice(&value.to_le_bytes());
-}
-
 fn push_u32(bytes: &mut Vec<u8>, value: u32) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
 fn push_u64(bytes: &mut Vec<u8>, value: u64) {
-    bytes.extend_from_slice(&value.to_le_bytes());
-}
-
-fn push_i32(bytes: &mut Vec<u8>, value: i32) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
@@ -543,6 +864,7 @@ fn diameter_for_depth(depth: u16) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prost::Message;
 
     #[test]
     fn canonical_morphology_sorting() {
@@ -667,5 +989,51 @@ mod tests {
             assert!(neuron.compartments.len() <= MAX_COMPARTMENTS_PER_NEURON);
             assert_eq!(neuron.compartments.len(), 15);
         }
+    }
+
+    #[test]
+    fn payload_canonical_roundtrip_deterministic() {
+        let morph = demo_morphology_3comp(2);
+        let morph_payload = build_morphology_payload(&morph);
+        let bytes = morph_payload.encode_to_vec();
+        let mut decoded = MorphologySetPayload::decode(bytes.as_slice()).expect("morph decode");
+        normalize_payload_morphology(&mut decoded);
+        let bytes_roundtrip = decoded.encode_to_vec();
+        assert_eq!(bytes, bytes_roundtrip);
+
+        let channel = demo_channel_params(&morph);
+        let channel_payload = build_channel_params_payload(&channel);
+        let bytes = channel_payload.encode_to_vec();
+        let mut decoded =
+            ChannelParamsSetPayload::decode(bytes.as_slice()).expect("channel decode");
+        normalize_payload_channel_params(&mut decoded);
+        let bytes_roundtrip = decoded.encode_to_vec();
+        assert_eq!(bytes, bytes_roundtrip);
+
+        let syn = demo_syn_params();
+        let syn_payload = build_synapse_params_payload(&syn);
+        let bytes = syn_payload.encode_to_vec();
+        let mut decoded = SynapseParamsSetPayload::decode(bytes.as_slice()).expect("syn decode");
+        normalize_payload_synapse_params(&mut decoded);
+        let bytes_roundtrip = decoded.encode_to_vec();
+        assert_eq!(bytes, bytes_roundtrip);
+
+        let connectivity = demo_connectivity(2, &syn);
+        let conn_payload = build_connectivity_payload(&connectivity);
+        let bytes = conn_payload.encode_to_vec();
+        let mut decoded =
+            ConnectivityGraphPayload::decode(bytes.as_slice()).expect("connectivity decode");
+        normalize_payload_connectivity(&mut decoded);
+        let bytes_roundtrip = decoded.encode_to_vec();
+        assert_eq!(bytes, bytes_roundtrip);
+    }
+
+    #[test]
+    fn payload_digests_are_stable() {
+        let morph = demo_morphology_3comp(2);
+        let morph_payload = build_morphology_payload(&morph);
+        let digest_a = morphology_payload_digest(&morph_payload);
+        let digest_b = morphology_payload_digest(&morph_payload);
+        assert_eq!(digest_a, digest_b);
     }
 }

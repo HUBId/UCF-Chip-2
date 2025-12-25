@@ -9,6 +9,7 @@ prost = "0.12"
 thiserror = { workspace = true }
 ucf = { package = "ucf-protocol", path = "../../ucf-protocol" }
 biophys_assets = { path = "../biophys_assets" }
+zstd = "0.13"
 
 [dev-dependencies]
 asset_chunker = { path = "../asset_chunker" }

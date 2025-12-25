@@ -28,7 +28,12 @@ use {
         AssetRehydrator,
     },
     biophys_asset_builder::{CircuitBuilderFromAssets, Error as AssetBuildError},
-    biophys_assets::{ChannelParamsSet, ConnectivityGraph, MorphologySet, SynapseParamsSet},
+    biophys_assets::{
+        channel_params_from_payload, channel_params_payload_digest, connectivity_from_payload,
+        connectivity_payload_digest, morphology_from_payload, morphology_payload_digest,
+        synapse_params_from_payload, synapse_params_payload_digest, ChannelParamsSet,
+        ConnectivityGraph, MorphologySet, SynapseParamsSet,
+    },
     ucf::v1::{AssetBundle, AssetKind},
 };
 
@@ -184,25 +189,51 @@ impl HypothalamusL4Microcircuit {
             .as_ref()
             .ok_or(AssetBuildError::MissingManifest)?;
         let manifest_digest = digest_from_vec(&manifest.manifest_digest, "manifest_digest")?;
-        let morph_digest = manifest_digest_for_kind(manifest, AssetKind::Morphology)?;
-        let chan_digest = manifest_digest_for_kind(manifest, AssetKind::ChannelParams)?;
-        let syn_digest = manifest_digest_for_kind(manifest, AssetKind::SynapseParams)?;
-        let conn_digest = manifest_digest_for_kind(manifest, AssetKind::Connectivity)?;
+        let morph_digest = manifest_digest_for_kind(manifest, AssetKind::MorphologySet)?;
+        let chan_digest = manifest_digest_for_kind(manifest, AssetKind::ChannelParamsSet)?;
+        let syn_digest = manifest_digest_for_kind(manifest, AssetKind::SynapseParamsSet)?;
+        let conn_digest = manifest_digest_for_kind(manifest, AssetKind::ConnectivityGraph)?;
 
-        let morph_bytes = rehydrator.reassemble(bundle, AssetKind::Morphology, morph_digest)?;
-        let chan_bytes = rehydrator.reassemble(bundle, AssetKind::ChannelParams, chan_digest)?;
-        let syn_bytes = rehydrator.reassemble(bundle, AssetKind::SynapseParams, syn_digest)?;
-        let conn_bytes = rehydrator.reassemble(bundle, AssetKind::Connectivity, conn_digest)?;
+        let morph_bytes = rehydrator.reassemble(bundle, AssetKind::MorphologySet, morph_digest)?;
+        let chan_bytes = rehydrator.reassemble(bundle, AssetKind::ChannelParamsSet, chan_digest)?;
+        let syn_bytes = rehydrator.reassemble(bundle, AssetKind::SynapseParamsSet, syn_digest)?;
+        let conn_bytes =
+            rehydrator.reassemble(bundle, AssetKind::ConnectivityGraph, conn_digest)?;
 
-        let morph = decode_morphology(&morph_bytes)?;
-        let chan = decode_channel_params(&chan_bytes)?;
-        let syn = decode_synapse_params(&syn_bytes)?;
-        let conn = decode_connectivity(&conn_bytes)?;
+        let morph_payload = decode_morphology(&morph_bytes)?;
+        let chan_payload = decode_channel_params(&chan_bytes)?;
+        let syn_payload = decode_synapse_params(&syn_bytes)?;
+        let conn_payload = decode_connectivity(&conn_bytes)?;
 
-        verify_asset_digest("morphology", morph.digest(), morph_digest)?;
-        verify_asset_digest("channel_params", chan.digest(), chan_digest)?;
-        verify_asset_digest("synapse_params", syn.digest(), syn_digest)?;
-        verify_asset_digest("connectivity", conn.digest(), conn_digest)?;
+        verify_asset_digest(
+            "morphology",
+            morphology_payload_digest(&morph_payload),
+            morph_digest,
+        )?;
+        verify_asset_digest(
+            "channel_params",
+            channel_params_payload_digest(&chan_payload),
+            chan_digest,
+        )?;
+        verify_asset_digest(
+            "synapse_params",
+            synapse_params_payload_digest(&syn_payload),
+            syn_digest,
+        )?;
+        verify_asset_digest(
+            "connectivity",
+            connectivity_payload_digest(&conn_payload),
+            conn_digest,
+        )?;
+
+        let morph = morphology_from_payload(&morph_payload)
+            .map_err(|message| AssetBuildError::InvalidAssetData { message })?;
+        let chan = channel_params_from_payload(&chan_payload)
+            .map_err(|message| AssetBuildError::InvalidAssetData { message })?;
+        let syn = synapse_params_from_payload(&syn_payload)
+            .map_err(|message| AssetBuildError::InvalidAssetData { message })?;
+        let conn = connectivity_from_payload(&conn_payload, &syn_payload)
+            .map_err(|message| AssetBuildError::InvalidAssetData { message })?;
 
         if conn.edges.len() > MAX_ASSET_EDGES {
             return Err(AssetBuildError::BoundsExceeded {
@@ -1816,10 +1847,10 @@ fn manifest_digest_for_kind(
 #[cfg(feature = "biophys-l4-hypothalamus-assets")]
 fn kind_name(kind: AssetKind) -> &'static str {
     match kind {
-        AssetKind::Morphology => "morphology",
-        AssetKind::ChannelParams => "channel_params",
-        AssetKind::SynapseParams => "synapse_params",
-        AssetKind::Connectivity => "connectivity",
+        AssetKind::MorphologySet => "morphology",
+        AssetKind::ChannelParamsSet => "channel_params",
+        AssetKind::SynapseParamsSet => "synapse_params",
+        AssetKind::ConnectivityGraph => "connectivity",
         AssetKind::Unknown => "unknown",
     }
 }
@@ -2336,28 +2367,28 @@ mod asset_tests {
             manifest_digest: vec![0u8; 32],
             components: vec![
                 to_asset_digest(
-                    AssetKind::Morphology,
+                    AssetKind::MorphologySet,
                     morph.version,
                     morph.digest(),
                     created_at_ms,
                     None,
                 ),
                 to_asset_digest(
-                    AssetKind::ChannelParams,
+                    AssetKind::ChannelParamsSet,
                     chan.version,
                     chan.digest(),
                     created_at_ms,
                     None,
                 ),
                 to_asset_digest(
-                    AssetKind::SynapseParams,
+                    AssetKind::SynapseParamsSet,
                     syn.version,
                     syn.digest(),
                     created_at_ms,
                     None,
                 ),
                 to_asset_digest(
-                    AssetKind::Connectivity,
+                    AssetKind::ConnectivityGraph,
                     conn.version,
                     conn_digest,
                     created_at_ms,
@@ -2377,7 +2408,7 @@ mod asset_tests {
         let mut chunks = Vec::new();
         chunks.extend(
             chunk_asset(
-                AssetKind::Morphology,
+                AssetKind::MorphologySet,
                 morph.version,
                 morph.digest(),
                 &morph.to_canonical_bytes(),
@@ -2388,7 +2419,7 @@ mod asset_tests {
         );
         chunks.extend(
             chunk_asset(
-                AssetKind::ChannelParams,
+                AssetKind::ChannelParamsSet,
                 chan.version,
                 chan.digest(),
                 &chan.to_canonical_bytes(),
@@ -2399,7 +2430,7 @@ mod asset_tests {
         );
         chunks.extend(
             chunk_asset(
-                AssetKind::SynapseParams,
+                AssetKind::SynapseParamsSet,
                 syn.version,
                 syn.digest(),
                 &syn.to_canonical_bytes(),
@@ -2411,7 +2442,7 @@ mod asset_tests {
         let conn_bytes = conn_bytes_override.unwrap_or_else(|| conn.to_canonical_bytes());
         chunks.extend(
             chunk_asset(
-                AssetKind::Connectivity,
+                AssetKind::ConnectivityGraph,
                 conn.version,
                 conn_digest,
                 &conn_bytes,
