@@ -40,6 +40,8 @@ pub enum ChunkerError {
     ChunkLimitExceeded { required: u32, limit: u32 },
     #[error("unsupported compression")]
     UnsupportedCompression,
+    #[error("compression failed: {message}")]
+    CompressionFailed { message: String },
     #[error("invalid max_chunk_bytes")]
     InvalidChunkSize,
 }
@@ -157,7 +159,12 @@ fn chunk_count(total_bytes: usize, max_chunk_bytes: usize) -> u32 {
 fn compress_payload(payload: &[u8], compression: Compression) -> Result<Vec<u8>, ChunkerError> {
     match compression {
         Compression::None => Ok(payload.to_vec()),
-        Compression::Unknown | Compression::Zstd => Err(ChunkerError::UnsupportedCompression),
+        Compression::Zstd => {
+            zstd::stream::encode_all(payload, 0).map_err(|err| ChunkerError::CompressionFailed {
+                message: err.to_string(),
+            })
+        }
+        Compression::Unknown => Err(ChunkerError::UnsupportedCompression),
     }
 }
 
@@ -212,8 +219,8 @@ mod tests {
             bundle_id_policy: BundleIdPolicy::ManifestDigestPrefix { prefix_len: 8 },
         };
         let bytes = b"deterministic-chunk";
-        let chunks_a = chunk_asset(AssetKind::Morphology, 1, [1u8; 32], bytes, &cfg, 5).unwrap();
-        let chunks_b = chunk_asset(AssetKind::Morphology, 1, [1u8; 32], bytes, &cfg, 5).unwrap();
+        let chunks_a = chunk_asset(AssetKind::MorphologySet, 1, [1u8; 32], bytes, &cfg, 5).unwrap();
+        let chunks_b = chunk_asset(AssetKind::MorphologySet, 1, [1u8; 32], bytes, &cfg, 5).unwrap();
 
         assert_eq!(chunks_a, chunks_b);
         let digests_a: Vec<_> = chunks_a
@@ -237,7 +244,7 @@ mod tests {
             bundle_id_policy: BundleIdPolicy::ManifestDigestPrefix { prefix_len: 8 },
         };
         let chunks =
-            chunk_asset(AssetKind::Morphology, 1, [2u8; 32], b"payload", &cfg, 10).unwrap();
+            chunk_asset(AssetKind::MorphologySet, 1, [2u8; 32], b"payload", &cfg, 10).unwrap();
 
         let bundle_a = build_asset_bundle(manifest.clone(), chunks.clone(), 10);
         let bundle_b = build_asset_bundle(manifest, chunks, 10);
@@ -254,7 +261,8 @@ mod tests {
             bundle_id_policy: BundleIdPolicy::ManifestDigestPrefix { prefix_len: 8 },
         };
 
-        let err = chunk_asset(AssetKind::Morphology, 1, [3u8; 32], b"too", &cfg, 10).unwrap_err();
+        let err =
+            chunk_asset(AssetKind::MorphologySet, 1, [3u8; 32], b"too", &cfg, 10).unwrap_err();
 
         assert!(matches!(err, ChunkerError::ChunkLimitExceeded { .. }));
     }

@@ -104,28 +104,28 @@ pub(crate) fn build_biophys_components(
 
     vec![
         to_asset_digest(
-            AssetKind::Morphology,
+            AssetKind::MorphologySet,
             morph.version,
             morph.digest(),
             created_at_ms,
             None,
         ),
         to_asset_digest(
-            AssetKind::ChannelParams,
+            AssetKind::ChannelParamsSet,
             channels.version,
             channels.digest(),
             created_at_ms,
             None,
         ),
         to_asset_digest(
-            AssetKind::SynapseParams,
+            AssetKind::SynapseParamsSet,
             syn.version,
             syn.digest(),
             created_at_ms,
             None,
         ),
         to_asset_digest(
-            AssetKind::Connectivity,
+            AssetKind::ConnectivityGraph,
             graph.version,
             graph.digest(),
             created_at_ms,
@@ -141,7 +141,7 @@ fn build_biophys_chunks(
 ) -> Result<Vec<AssetChunk>, ChunkerError> {
     let mut chunks = Vec::new();
     chunks.extend(chunk_asset(
-        AssetKind::Morphology,
+        AssetKind::MorphologySet,
         assets.morph.version,
         assets.morph.digest(),
         &assets.morph.to_canonical_bytes(),
@@ -149,7 +149,7 @@ fn build_biophys_chunks(
         created_at_ms,
     )?);
     chunks.extend(chunk_asset(
-        AssetKind::ChannelParams,
+        AssetKind::ChannelParamsSet,
         assets.channels.version,
         assets.channels.digest(),
         &assets.channels.to_canonical_bytes(),
@@ -157,7 +157,7 @@ fn build_biophys_chunks(
         created_at_ms,
     )?);
     chunks.extend(chunk_asset(
-        AssetKind::SynapseParams,
+        AssetKind::SynapseParamsSet,
         assets.syn.version,
         assets.syn.digest(),
         &assets.syn.to_canonical_bytes(),
@@ -165,7 +165,7 @@ fn build_biophys_chunks(
         created_at_ms,
     )?);
     chunks.extend(chunk_asset(
-        AssetKind::Connectivity,
+        AssetKind::ConnectivityGraph,
         assets.graph.version,
         assets.graph.digest(),
         &assets.graph.to_canonical_bytes(),

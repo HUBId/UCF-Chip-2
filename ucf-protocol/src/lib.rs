@@ -111,10 +111,33 @@ pub mod v1 {
     #[repr(i32)]
     pub enum AssetKind {
         Unknown = 0,
-        Morphology = 1,
-        ChannelParams = 2,
-        SynapseParams = 3,
-        Connectivity = 4,
+        MorphologySet = 1,
+        ChannelParamsSet = 2,
+        SynapseParamsSet = 3,
+        ConnectivityGraph = 4,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
+    #[repr(i32)]
+    pub enum CompartmentKind {
+        Soma = 0,
+        Dendrite = 1,
+        Axon = 2,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
+    #[repr(i32)]
+    pub enum SynapseType {
+        Exc = 0,
+        Inh = 1,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
+    #[repr(i32)]
+    pub enum ModChannel {
+        None = 0,
+        A = 1,
+        B = 2,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
@@ -261,6 +284,116 @@ pub mod v1 {
         pub manifest: Option<AssetManifest>,
         #[prost(message, repeated, tag = "5")]
         pub chunks: ::prost::alloc::vec::Vec<AssetChunk>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct MorphologySetPayload {
+        #[prost(uint32, tag = "1")]
+        pub version: u32,
+        #[prost(message, repeated, tag = "2")]
+        pub neurons: ::prost::alloc::vec::Vec<MorphNeuronPayload>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct MorphNeuronPayload {
+        #[prost(uint32, tag = "1")]
+        pub neuron_id: u32,
+        #[prost(message, repeated, tag = "2")]
+        pub compartments: ::prost::alloc::vec::Vec<CompartmentPayload>,
+        #[prost(message, repeated, tag = "3")]
+        pub labels: ::prost::alloc::vec::Vec<LabelKv>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct LabelKv {
+        #[prost(string, tag = "1")]
+        pub k: ::prost::alloc::string::String,
+        #[prost(string, tag = "2")]
+        pub v: ::prost::alloc::string::String,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct CompartmentPayload {
+        #[prost(uint32, tag = "1")]
+        pub comp_id: u32,
+        #[prost(uint32, optional, tag = "2")]
+        pub parent: Option<u32>,
+        #[prost(enumeration = "CompartmentKind", tag = "3")]
+        pub kind: i32,
+        #[prost(uint32, tag = "4")]
+        pub length_um: u32,
+        #[prost(uint32, tag = "5")]
+        pub diameter_um: u32,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct ChannelParamsSetPayload {
+        #[prost(uint32, tag = "1")]
+        pub version: u32,
+        #[prost(message, repeated, tag = "2")]
+        pub params: ::prost::alloc::vec::Vec<ChannelParamsPayload>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct ChannelParamsPayload {
+        #[prost(uint32, tag = "1")]
+        pub neuron_id: u32,
+        #[prost(uint32, tag = "2")]
+        pub comp_id: u32,
+        #[prost(uint32, tag = "3")]
+        pub leak_g: u32,
+        #[prost(uint32, tag = "4")]
+        pub na_g: u32,
+        #[prost(uint32, tag = "5")]
+        pub k_g: u32,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct SynapseParamsSetPayload {
+        #[prost(uint32, tag = "1")]
+        pub version: u32,
+        #[prost(message, repeated, tag = "2")]
+        pub params: ::prost::alloc::vec::Vec<SynapseParamsPayload>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct SynapseParamsPayload {
+        #[prost(uint32, tag = "1")]
+        pub syn_param_id: u32,
+        #[prost(enumeration = "SynapseType", tag = "2")]
+        pub syn_type: i32,
+        #[prost(int32, tag = "3")]
+        pub weight_base: i32,
+        #[prost(uint32, tag = "4")]
+        pub stp_u: u32,
+        #[prost(uint32, tag = "5")]
+        pub tau_rec: u32,
+        #[prost(uint32, tag = "6")]
+        pub tau_fac: u32,
+        #[prost(enumeration = "ModChannel", tag = "7")]
+        pub mod_channel: i32,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct ConnectivityGraphPayload {
+        #[prost(uint32, tag = "1")]
+        pub version: u32,
+        #[prost(message, repeated, tag = "2")]
+        pub edges: ::prost::alloc::vec::Vec<ConnectivityEdgePayload>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct ConnectivityEdgePayload {
+        #[prost(uint32, tag = "1")]
+        pub pre: u32,
+        #[prost(uint32, tag = "2")]
+        pub post: u32,
+        #[prost(uint32, tag = "3")]
+        pub post_compartment: u32,
+        #[prost(uint32, tag = "4")]
+        pub syn_param_id: u32,
+        #[prost(uint32, tag = "5")]
+        pub delay_steps: u32,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
