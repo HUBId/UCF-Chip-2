@@ -141,13 +141,7 @@ impl AmygdalaL4Microcircuit {
             .map(|idx| build_neuron(idx as u32))
             .collect::<Vec<_>>();
         let synapses = build_synapses();
-        Self::build_from_parts(
-            config,
-            neurons,
-            synapses,
-            None,
-            0,
-        )
+        Self::build_from_parts(config, neurons, synapses, None, 0)
     }
 
     #[cfg(feature = "biophys-l4-amygdala-assets")]
@@ -1012,10 +1006,7 @@ fn validate_asset_pool_mapping(morph: &MorphologySet) -> Result<(), AssetBuildEr
         }
     }
     let required = [0_u32, 1, 2, 3, 4, 5, 6, 7, 8];
-    if required
-        .iter()
-        .any(|neuron_id| !seen.contains(neuron_id))
-    {
+    if required.iter().any(|neuron_id| !seen.contains(neuron_id)) {
         return Err(AssetBuildError::InvalidAssetData {
             message: "Asset Convention v1 requires neuron ids 0-1 integrity, 2-3 exfil, 4-5 probing, 6-7 tool, 8 inhibitory".to_string(),
         });
@@ -1188,8 +1179,8 @@ impl CircuitBuilderFromAssets for AmygdalaL4Microcircuit {
 
             let solver = L4Solver::new(morphology.clone(), channels, DT_MS, CLAMP_MIN, CLAMP_MAX)
                 .map_err(|error| AssetBuildError::InvalidAssetData {
-                    message: format!("solver init failed: {error:?}"),
-                })?;
+                message: format!("solver init failed: {error:?}"),
+            })?;
             let state = L4State::new(-65.0, morphology.compartments.len());
             let last_soma_v = state.voltages[0];
             neurons.push(L4Neuron {
