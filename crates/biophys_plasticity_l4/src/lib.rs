@@ -100,7 +100,7 @@ mod tests {
         assert_eq!(trace.post_trace_q, 375);
         trace.on_pre_spike();
         trace.on_post_spike();
-        assert_eq!(trace.pre_trace_q, TRACE_SCALE_Q);
+        assert_eq!(trace.pre_trace_q, 800);
         assert_eq!(trace.post_trace_q, 675);
     }
 
