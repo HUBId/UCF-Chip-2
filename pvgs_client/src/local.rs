@@ -2,12 +2,12 @@
 
 use crate::{PvgsError, PvgsReader, PvgsWriter};
 use chip4::pvgs::{
-    AssetManifestAppend, AssetManifestCommit, CbvQuery, Digest32, MicrocircuitConfigCommit,
-    PevQuery,
+    AssetBundleAppend, AssetBundleCommit, AssetManifestAppend, AssetManifestCommit, CbvQuery,
+    Digest32, MicrocircuitConfigCommit, PevQuery,
 };
 use ucf::v1::{
-    AssetManifest, CharacterBaselineVector, MicrocircuitConfigAppend, MicrocircuitConfigEvidence,
-    PolicyEcologyVector, PvgsReceipt,
+    AssetBundle, AssetManifest, CharacterBaselineVector, MicrocircuitConfigAppend,
+    MicrocircuitConfigEvidence, PolicyEcologyVector, PvgsReceipt,
 };
 
 #[derive(Clone)]
@@ -93,6 +93,10 @@ impl<C: MicrocircuitConfigCommit> PvgsWriter for LocalPvgsWriter<C> {
     ) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }
+
+    fn commit_asset_bundle(&mut self, _bundle: AssetBundle) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
 }
 
 #[derive(Clone)]
@@ -125,6 +129,51 @@ impl<C: AssetManifestCommit> PvgsWriter for LocalAssetManifestWriter<C> {
     fn commit_asset_manifest(&mut self, manifest: AssetManifest) -> Result<PvgsReceipt, PvgsError> {
         Ok(self.commit.commit_asset_manifest(AssetManifestAppend {
             manifest: Some(manifest),
+        }))
+    }
+
+    fn commit_asset_bundle(&mut self, _bundle: AssetBundle) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+}
+
+#[derive(Clone)]
+pub struct LocalAssetBundleWriter<C: AssetBundleCommit> {
+    commit: C,
+}
+
+impl<C: AssetBundleCommit> LocalAssetBundleWriter<C> {
+    pub fn new(commit: C) -> Self {
+        Self { commit }
+    }
+}
+
+impl<C: AssetBundleCommit> PvgsWriter for LocalAssetBundleWriter<C> {
+    fn commit_control_frame_evidence(
+        &mut self,
+        _session_id: &str,
+        _control_frame_digest: [u8; 32],
+    ) -> Result<(), PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_microcircuit_config(
+        &mut self,
+        _evidence: MicrocircuitConfigEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_asset_manifest(
+        &mut self,
+        _manifest: AssetManifest,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_asset_bundle(&mut self, bundle: AssetBundle) -> Result<PvgsReceipt, PvgsError> {
+        Ok(self.commit.commit_asset_bundle(AssetBundleAppend {
+            bundle: Some(bundle),
         }))
     }
 }

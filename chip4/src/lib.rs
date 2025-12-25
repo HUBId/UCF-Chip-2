@@ -4,8 +4,8 @@ pub mod pvgs {
     use prost::Message;
     use std::sync::{Arc, Mutex};
     use ucf::v1::{
-        AssetManifest, CharacterBaselineVector, MicrocircuitConfigAppend, PolicyEcologyVector,
-        PvgsReceipt,
+        AssetBundle, AssetManifest, CharacterBaselineVector, MicrocircuitConfigAppend,
+        PolicyEcologyVector, PvgsReceipt,
     };
 
     #[derive(Clone, PartialEq, Message)]
@@ -72,12 +72,23 @@ pub mod pvgs {
         fn commit_asset_manifest(&self, append: AssetManifestAppend) -> PvgsReceipt;
     }
 
+    #[derive(Clone, PartialEq, Message)]
+    pub struct AssetBundleAppend {
+        #[prost(message, optional, tag = "1")]
+        pub bundle: Option<AssetBundle>,
+    }
+
+    pub trait AssetBundleCommit: Clone + Send + Sync {
+        fn commit_asset_bundle(&self, append: AssetBundleAppend) -> PvgsReceipt;
+    }
+
     #[derive(Clone, Default)]
     pub struct InMemoryPvgs {
         latest_cbv: Arc<Mutex<Option<Cbv>>>,
         latest_pev: Arc<Mutex<Option<Pev>>>,
         latest_microcircuit_config: Arc<Mutex<Option<MicrocircuitConfigAppend>>>,
         latest_asset_manifest: Arc<Mutex<Option<AssetManifestAppend>>>,
+        latest_asset_bundle: Arc<Mutex<Option<AssetBundleAppend>>>,
     }
 
     impl InMemoryPvgs {
@@ -114,6 +125,10 @@ pub mod pvgs {
         pub fn latest_asset_manifest(&self) -> Option<AssetManifestAppend> {
             self.latest_asset_manifest.lock().unwrap().clone()
         }
+
+        pub fn latest_asset_bundle(&self) -> Option<AssetBundleAppend> {
+            self.latest_asset_bundle.lock().unwrap().clone()
+        }
     }
 
     impl CbvQuery for InMemoryPvgs {
@@ -138,6 +153,13 @@ pub mod pvgs {
     impl AssetManifestCommit for InMemoryPvgs {
         fn commit_asset_manifest(&self, append: AssetManifestAppend) -> PvgsReceipt {
             *self.latest_asset_manifest.lock().unwrap() = Some(append);
+            PvgsReceipt::default()
+        }
+    }
+
+    impl AssetBundleCommit for InMemoryPvgs {
+        fn commit_asset_bundle(&self, append: AssetBundleAppend) -> PvgsReceipt {
+            *self.latest_asset_bundle.lock().unwrap() = Some(append);
             PvgsReceipt::default()
         }
     }

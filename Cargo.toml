@@ -73,6 +73,7 @@ members = [
     "crates/biophys_compartmental_solver",
     "crates/biophys_event_queue_l4",
     "crates/assets",
+    "crates/asset_chunker",
     "crates/pvgs",
     "crates/query",
     "crates/scorecards",

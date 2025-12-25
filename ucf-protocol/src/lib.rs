@@ -117,6 +117,14 @@ pub mod v1 {
         Connectivity = 4,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
+    #[repr(i32)]
+    pub enum Compression {
+        Unknown = 0,
+        None = 1,
+        Zstd = 2,
+    }
+
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
     pub struct TraitUpdate {
         #[prost(string, tag = "1")]
@@ -217,6 +225,42 @@ pub mod v1 {
         pub manifest_digest: ::prost::alloc::vec::Vec<u8>,
         #[prost(message, repeated, tag = "4")]
         pub components: ::prost::alloc::vec::Vec<AssetDigest>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct AssetChunk {
+        #[prost(enumeration = "AssetKind", tag = "1")]
+        pub kind: i32,
+        #[prost(uint32, tag = "2")]
+        pub version: u32,
+        #[prost(bytes, tag = "3")]
+        pub asset_digest: ::prost::alloc::vec::Vec<u8>,
+        #[prost(uint32, tag = "4")]
+        pub chunk_index: u32,
+        #[prost(uint32, tag = "5")]
+        pub chunk_count: u32,
+        #[prost(bytes, tag = "6")]
+        pub chunk_digest: ::prost::alloc::vec::Vec<u8>,
+        #[prost(enumeration = "Compression", tag = "7")]
+        pub compression: i32,
+        #[prost(bytes, tag = "8")]
+        pub payload: ::prost::alloc::vec::Vec<u8>,
+        #[prost(uint64, tag = "9")]
+        pub created_at_ms: u64,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct AssetBundle {
+        #[prost(string, tag = "1")]
+        pub bundle_id: ::prost::alloc::string::String,
+        #[prost(uint64, tag = "2")]
+        pub created_at_ms: u64,
+        #[prost(bytes, tag = "3")]
+        pub bundle_digest: ::prost::alloc::vec::Vec<u8>,
+        #[prost(message, optional, tag = "4")]
+        pub manifest: Option<AssetManifest>,
+        #[prost(message, repeated, tag = "5")]
+        pub chunks: ::prost::alloc::vec::Vec<AssetChunk>,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]

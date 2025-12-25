@@ -148,6 +148,13 @@ mod tests {
         ) -> Result<ucf::v1::PvgsReceipt, PvgsError> {
             Ok(ucf::v1::PvgsReceipt::default())
         }
+
+        fn commit_asset_bundle(
+            &mut self,
+            _bundle: ucf::v1::AssetBundle,
+        ) -> Result<ucf::v1::PvgsReceipt, PvgsError> {
+            Ok(ucf::v1::PvgsReceipt::default())
+        }
     }
 
     #[test]

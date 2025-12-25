@@ -1,12 +1,16 @@
 #![forbid(unsafe_code)]
 
+use asset_chunker::{
+    build_asset_bundle_with_policy, chunk_asset, BundleIdPolicy, ChunkerConfig, ChunkerError,
+};
 use biophys_assets::{
-    demo_channel_params, demo_connectivity, demo_morphology_3comp, demo_syn_params, to_asset_digest,
+    demo_channel_params, demo_connectivity, demo_morphology_3comp, demo_syn_params,
+    to_asset_digest, ChannelParamsSet, ConnectivityGraph, MorphologySet, SynapseParamsSet,
 };
 use blake3::Hasher;
 use prost::Message;
 use pvgs_client::PvgsWriter;
-use ucf::v1::{AssetDigest, AssetKind, AssetManifest};
+use ucf::v1::{AssetChunk, AssetDigest, AssetKind, AssetManifest, Compression};
 
 const ASSET_MANIFEST_DOMAIN: &str = "UCF:ASSET:MANIFEST";
 pub(crate) const ASSET_MANIFEST_VERSION: u32 = 1;
@@ -14,7 +18,7 @@ pub(crate) const DEFAULT_ASSET_NEURONS: u32 = 4;
 
 #[derive(Debug, Default)]
 pub(crate) struct AssetPublisherState {
-    published_manifest_digest: Option<[u8; 32]>,
+    published_bundle_digest: Option<[u8; 32]>,
     created_at_ms_fixed: Option<u64>,
 }
 
@@ -26,39 +30,77 @@ impl AssetPublisherState {
     pub(crate) fn maybe_publish(
         &mut self,
         now_ms: u64,
-        components: Vec<AssetDigest>,
+        neurons: u32,
         writer: Option<&mut (dyn PvgsWriter + Send + '_)>,
     ) -> [u8; 32] {
         let created_at_ms = self.fixed_created_at_ms(now_ms);
+        let assets = build_biophys_assets(neurons);
+        let components = build_biophys_components(created_at_ms, &assets);
         let manifest = build_manifest(ASSET_MANIFEST_VERSION, created_at_ms, components);
-        let digest = manifest_digest_from_proto(&manifest);
+        let manifest_digest = manifest_digest_from_proto(&manifest);
+        let cfg = default_chunker_config();
+        let chunks = match build_biophys_chunks(&assets, &cfg, created_at_ms) {
+            Ok(chunks) => chunks,
+            Err(_) => {
+                self.published_bundle_digest = None;
+                return manifest_digest;
+            }
+        };
+        let bundle =
+            build_asset_bundle_with_policy(manifest, chunks, created_at_ms, cfg.bundle_id_policy);
+        let bundle_digest = bundle_digest_from_proto(&bundle);
 
         let Some(writer) = writer else {
-            self.published_manifest_digest = None;
-            return digest;
+            self.published_bundle_digest = None;
+            return manifest_digest;
         };
 
         if self
-            .published_manifest_digest
-            .map(|current| current == digest)
+            .published_bundle_digest
+            .map(|current| current == bundle_digest)
             .unwrap_or(false)
         {
-            return digest;
+            return manifest_digest;
         }
 
-        if writer.commit_asset_manifest(manifest).is_ok() {
-            self.published_manifest_digest = Some(digest);
+        if writer.commit_asset_bundle(bundle).is_ok() {
+            self.published_bundle_digest = Some(bundle_digest);
         }
 
-        digest
+        manifest_digest
     }
 }
 
-pub(crate) fn build_biophys_components(created_at_ms: u64, neurons: u32) -> Vec<AssetDigest> {
+#[derive(Debug, Clone)]
+pub(crate) struct BiophysAssets {
+    pub(crate) morph: MorphologySet,
+    pub(crate) channels: ChannelParamsSet,
+    pub(crate) syn: SynapseParamsSet,
+    pub(crate) graph: ConnectivityGraph,
+}
+
+pub(crate) fn build_biophys_assets(neurons: u32) -> BiophysAssets {
     let morph = demo_morphology_3comp(neurons);
     let channels = demo_channel_params(&morph);
     let syn = demo_syn_params();
     let graph = demo_connectivity(neurons, &syn);
+
+    BiophysAssets {
+        morph,
+        channels,
+        syn,
+        graph,
+    }
+}
+
+pub(crate) fn build_biophys_components(
+    created_at_ms: u64,
+    assets: &BiophysAssets,
+) -> Vec<AssetDigest> {
+    let morph = &assets.morph;
+    let channels = &assets.channels;
+    let syn = &assets.syn;
+    let graph = &assets.graph;
 
     vec![
         to_asset_digest(
@@ -90,6 +132,57 @@ pub(crate) fn build_biophys_components(created_at_ms: u64, neurons: u32) -> Vec<
             None,
         ),
     ]
+}
+
+fn build_biophys_chunks(
+    assets: &BiophysAssets,
+    cfg: &ChunkerConfig,
+    created_at_ms: u64,
+) -> Result<Vec<AssetChunk>, ChunkerError> {
+    let mut chunks = Vec::new();
+    chunks.extend(chunk_asset(
+        AssetKind::Morphology,
+        assets.morph.version,
+        assets.morph.digest(),
+        &assets.morph.to_canonical_bytes(),
+        cfg,
+        created_at_ms,
+    )?);
+    chunks.extend(chunk_asset(
+        AssetKind::ChannelParams,
+        assets.channels.version,
+        assets.channels.digest(),
+        &assets.channels.to_canonical_bytes(),
+        cfg,
+        created_at_ms,
+    )?);
+    chunks.extend(chunk_asset(
+        AssetKind::SynapseParams,
+        assets.syn.version,
+        assets.syn.digest(),
+        &assets.syn.to_canonical_bytes(),
+        cfg,
+        created_at_ms,
+    )?);
+    chunks.extend(chunk_asset(
+        AssetKind::Connectivity,
+        assets.graph.version,
+        assets.graph.digest(),
+        &assets.graph.to_canonical_bytes(),
+        cfg,
+        created_at_ms,
+    )?);
+
+    Ok(chunks)
+}
+
+fn default_chunker_config() -> ChunkerConfig {
+    ChunkerConfig {
+        max_chunk_bytes: 64 * 1024,
+        compression: Compression::None,
+        max_chunks_total: 4096,
+        bundle_id_policy: BundleIdPolicy::ManifestDigestPrefix { prefix_len: 12 },
+    }
 }
 
 pub(crate) fn build_manifest(
@@ -129,6 +222,12 @@ fn manifest_digest_from_proto(manifest: &AssetManifest) -> [u8; 32] {
     digest
 }
 
+fn bundle_digest_from_proto(bundle: &ucf::v1::AssetBundle) -> [u8; 32] {
+    let mut digest = [0u8; 32];
+    digest.copy_from_slice(&bundle.bundle_digest[..32]);
+    digest
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,7 +235,7 @@ mod tests {
 
     #[derive(Default)]
     struct RecordingWriter {
-        commits: Arc<Mutex<Vec<AssetManifest>>>,
+        commits: Arc<Mutex<Vec<ucf::v1::AssetBundle>>>,
     }
 
     impl PvgsWriter for RecordingWriter {
@@ -157,15 +256,27 @@ mod tests {
 
         fn commit_asset_manifest(
             &mut self,
-            manifest: AssetManifest,
+            _manifest: AssetManifest,
         ) -> Result<ucf::v1::PvgsReceipt, pvgs_client::PvgsError> {
-            self.commits.lock().unwrap().push(manifest);
+            Ok(ucf::v1::PvgsReceipt::default())
+        }
+
+        fn commit_asset_bundle(
+            &mut self,
+            bundle: ucf::v1::AssetBundle,
+        ) -> Result<ucf::v1::PvgsReceipt, pvgs_client::PvgsError> {
+            self.commits.lock().unwrap().push(bundle);
             Ok(ucf::v1::PvgsReceipt::default())
         }
     }
 
+    fn build_assets() -> BiophysAssets {
+        build_biophys_assets(2)
+    }
+
     fn build_components(created_at_ms: u64, version_override: Option<u32>) -> Vec<AssetDigest> {
-        let mut components = build_biophys_components(created_at_ms, 2);
+        let assets = build_assets();
+        let mut components = build_biophys_components(created_at_ms, &assets);
         if let Some(version) = version_override {
             if let Some(first) = components.first_mut() {
                 first.version = version;
@@ -191,8 +302,7 @@ mod tests {
             commits: commits.clone(),
         };
 
-        let components = build_components(10, None);
-        publisher.maybe_publish(10, components, Some(&mut writer));
+        publisher.maybe_publish(10, 2, Some(&mut writer));
 
         let commits = commits.lock().unwrap();
         assert_eq!(commits.len(), 1);
@@ -206,23 +316,23 @@ mod tests {
             commits: commits.clone(),
         };
 
-        publisher.maybe_publish(10, build_components(10, None), Some(&mut writer));
-        publisher.maybe_publish(20, build_components(10, None), Some(&mut writer));
+        publisher.maybe_publish(10, 2, Some(&mut writer));
+        publisher.maybe_publish(20, 2, Some(&mut writer));
 
         let commits = commits.lock().unwrap();
         assert_eq!(commits.len(), 1);
     }
 
     #[test]
-    fn recommit_on_version_bump() {
+    fn recommit_on_asset_change() {
         let mut publisher = AssetPublisherState::default();
         let commits = Arc::new(Mutex::new(Vec::new()));
         let mut writer = RecordingWriter {
             commits: commits.clone(),
         };
 
-        publisher.maybe_publish(10, build_components(10, Some(1)), Some(&mut writer));
-        publisher.maybe_publish(20, build_components(10, Some(2)), Some(&mut writer));
+        publisher.maybe_publish(10, 2, Some(&mut writer));
+        publisher.maybe_publish(20, 3, Some(&mut writer));
 
         let commits = commits.lock().unwrap();
         assert_eq!(commits.len(), 2);

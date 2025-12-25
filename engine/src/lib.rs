@@ -22,7 +22,7 @@ use ucf::v1::{ControlFrame, IntegrityStateClass, LevelClass, ReasonCode, ToolCla
 mod asset_publisher;
 mod microcircuit_publisher;
 mod proto_bridge;
-use asset_publisher::{build_biophys_components, AssetPublisherState, DEFAULT_ASSET_NEURONS};
+use asset_publisher::{AssetPublisherState, DEFAULT_ASSET_NEURONS};
 use microcircuit_publisher::{MicrocircuitDigests, MicrocircuitPublisherState};
 use proto_bridge::{
     brain_input_from_signal_frame, control_frame_from_brain_output, BaselineContext,
@@ -398,11 +398,11 @@ impl RegulationEngine {
     }
 
     fn publish_asset_manifest(&mut self, now_ms: u64) {
-        let created_at_ms = self.asset_publisher.fixed_created_at_ms(now_ms);
-        let components = build_biophys_components(created_at_ms, DEFAULT_ASSET_NEURONS);
-        let digest =
-            self.asset_publisher
-                .maybe_publish(now_ms, components, self.pvgs_writer.as_deref_mut());
+        let digest = self.asset_publisher.maybe_publish(
+            now_ms,
+            DEFAULT_ASSET_NEURONS,
+            self.pvgs_writer.as_deref_mut(),
+        );
         self.brain_bus.set_asset_manifest_digest(digest);
     }
 
@@ -1103,6 +1103,13 @@ mod tests {
         fn commit_asset_manifest(
             &mut self,
             _manifest: ucf::v1::AssetManifest,
+        ) -> Result<ucf::v1::PvgsReceipt, PvgsError> {
+            Ok(ucf::v1::PvgsReceipt::default())
+        }
+
+        fn commit_asset_bundle(
+            &mut self,
+            _bundle: ucf::v1::AssetBundle,
         ) -> Result<ucf::v1::PvgsReceipt, PvgsError> {
             Ok(ucf::v1::PvgsReceipt::default())
         }

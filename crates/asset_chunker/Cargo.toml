@@ -1,0 +1,10 @@
+[package]
+name = "asset_chunker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+blake3 = "1"
+ucf = { package = "ucf-protocol", path = "../../ucf-protocol" }
+prost = "0.12"
+thiserror = "1"

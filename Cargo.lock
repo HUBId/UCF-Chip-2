@@ -33,6 +33,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "asset_chunker"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "prost",
+ "thiserror",
+ "ucf-protocol",
+]
+
+[[package]]
 name = "assets"
 version = "0.1.0"
 dependencies = [
@@ -391,6 +401,7 @@ dependencies = [
 name = "engine"
 version = "0.1.0"
 dependencies = [
+ "asset_chunker",
  "baseline_resolver",
  "biophys_assets",
  "biophys_core",

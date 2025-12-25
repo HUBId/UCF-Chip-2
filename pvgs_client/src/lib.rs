@@ -3,13 +3,13 @@
 #[cfg(any(test, feature = "local-pvgs"))]
 pub mod local;
 #[cfg(any(test, feature = "local-pvgs"))]
-pub use local::{LocalPvgsReader, LocalPvgsWriter};
+pub use local::{LocalAssetBundleWriter, LocalPvgsReader, LocalPvgsWriter};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use ucf::v1::{
-    AssetManifest, CharacterBaselineVector, MicrocircuitConfigEvidence, PolicyEcologyVector,
-    PvgsReceipt,
+    AssetBundle, AssetManifest, CharacterBaselineVector, MicrocircuitConfigEvidence,
+    PolicyEcologyVector, PvgsReceipt,
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -65,6 +65,8 @@ pub trait PvgsWriter: Send {
     ) -> Result<PvgsReceipt, PvgsError>;
 
     fn commit_asset_manifest(&mut self, manifest: AssetManifest) -> Result<PvgsReceipt, PvgsError>;
+
+    fn commit_asset_bundle(&mut self, bundle: AssetBundle) -> Result<PvgsReceipt, PvgsError>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -137,6 +139,7 @@ pub struct MockPvgsWriter {
     pub committed: Vec<(String, [u8; 32])>,
     pub committed_microcircuit_configs: Vec<MicrocircuitConfigEvidence>,
     pub committed_asset_manifests: Vec<AssetManifest>,
+    pub committed_asset_bundles: Vec<AssetBundle>,
     pub fail_with: Option<String>,
 }
 
@@ -146,6 +149,7 @@ impl MockPvgsWriter {
             committed: Vec::new(),
             committed_microcircuit_configs: Vec::new(),
             committed_asset_manifests: Vec::new(),
+            committed_asset_bundles: Vec::new(),
             fail_with: Some(reason.into()),
         }
     }
@@ -192,6 +196,17 @@ impl PvgsWriter for MockPvgsWriter {
         self.committed_asset_manifests.push(manifest);
         Ok(PvgsReceipt::default())
     }
+
+    fn commit_asset_bundle(&mut self, bundle: AssetBundle) -> Result<PvgsReceipt, PvgsError> {
+        if let Some(reason) = &self.fail_with {
+            return Err(PvgsError::CommitFailed {
+                reason: reason.clone(),
+            });
+        }
+
+        self.committed_asset_bundles.push(bundle);
+        Ok(PvgsReceipt::default())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -223,6 +238,10 @@ impl PvgsWriter for PlaceholderPvgsClient {
         &mut self,
         _manifest: AssetManifest,
     ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_asset_bundle(&mut self, _bundle: AssetBundle) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }
 }
@@ -301,6 +320,23 @@ mod tests {
 
         assert_eq!(writer.committed_asset_manifests.len(), 1);
         assert_eq!(writer.committed_asset_manifests[0], manifest);
+    }
+
+    #[test]
+    fn mock_writer_records_asset_bundle_commit() {
+        let mut writer = MockPvgsWriter::default();
+        let bundle = ucf::v1::AssetBundle {
+            bundle_id: "bundle:test".to_string(),
+            created_at_ms: 10,
+            bundle_digest: vec![2; 32],
+            manifest: None,
+            chunks: Vec::new(),
+        };
+
+        writer.commit_asset_bundle(bundle.clone()).unwrap();
+
+        assert_eq!(writer.committed_asset_bundles.len(), 1);
+        assert_eq!(writer.committed_asset_bundles[0], bundle);
     }
 
     #[test]
