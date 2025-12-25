@@ -2,6 +2,7 @@
 
 pub mod pvgs {
     use prost::Message;
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use ucf::v1::{
         AssetBundle, AssetManifest, CharacterBaselineVector, MicrocircuitConfigAppend,
@@ -82,6 +83,11 @@ pub mod pvgs {
         fn commit_asset_bundle(&self, append: AssetBundleAppend) -> PvgsReceipt;
     }
 
+    pub trait AssetBundleQuery: Clone + Send + Sync {
+        fn get_latest_asset_bundle(&self) -> Option<AssetBundle>;
+        fn get_asset_bundle(&self, digest: [u8; 32]) -> Option<AssetBundle>;
+    }
+
     #[derive(Clone, Default)]
     pub struct InMemoryPvgs {
         latest_cbv: Arc<Mutex<Option<Cbv>>>,
@@ -89,6 +95,7 @@ pub mod pvgs {
         latest_microcircuit_config: Arc<Mutex<Option<MicrocircuitConfigAppend>>>,
         latest_asset_manifest: Arc<Mutex<Option<AssetManifestAppend>>>,
         latest_asset_bundle: Arc<Mutex<Option<AssetBundleAppend>>>,
+        asset_bundles: Arc<Mutex<HashMap<[u8; 32], AssetBundle>>>,
     }
 
     impl InMemoryPvgs {
@@ -159,8 +166,32 @@ pub mod pvgs {
 
     impl AssetBundleCommit for InMemoryPvgs {
         fn commit_asset_bundle(&self, append: AssetBundleAppend) -> PvgsReceipt {
+            if let Some(bundle) = append.bundle.as_ref() {
+                if bundle.bundle_digest.len() == 32 {
+                    let mut digest = [0u8; 32];
+                    digest.copy_from_slice(&bundle.bundle_digest);
+                    self.asset_bundles
+                        .lock()
+                        .unwrap()
+                        .insert(digest, bundle.clone());
+                }
+            }
             *self.latest_asset_bundle.lock().unwrap() = Some(append);
             PvgsReceipt::default()
+        }
+    }
+
+    impl AssetBundleQuery for InMemoryPvgs {
+        fn get_latest_asset_bundle(&self) -> Option<AssetBundle> {
+            self.latest_asset_bundle
+                .lock()
+                .unwrap()
+                .clone()
+                .and_then(|append| append.bundle)
+        }
+
+        fn get_asset_bundle(&self, digest: [u8; 32]) -> Option<AssetBundle> {
+            self.asset_bundles.lock().unwrap().get(&digest).cloned()
         }
     }
 }

@@ -1,0 +1,17 @@
+[package]
+name = "asset_rehydration"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+blake3 = "1"
+prost = "0.12"
+thiserror = { workspace = true }
+ucf = { package = "ucf-protocol", path = "../../ucf-protocol" }
+biophys_assets = { path = "../biophys_assets" }
+
+[dev-dependencies]
+asset_chunker = { path = "../asset_chunker" }
+biophys_core = { path = "../biophys_core" }
+biophys_runtime = { path = "../biophys_runtime" }
+pvgs_client = { path = "../../pvgs_client" }

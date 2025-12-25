@@ -43,6 +43,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "asset_rehydration"
+version = "0.1.0"
+dependencies = [
+ "asset_chunker",
+ "biophys_assets",
+ "biophys_core",
+ "biophys_runtime",
+ "blake3",
+ "prost",
+ "pvgs_client",
+ "thiserror",
+ "ucf-protocol",
+]
+
+[[package]]
 name = "assets"
 version = "0.1.0"
 dependencies = [
