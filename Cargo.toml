@@ -45,6 +45,7 @@ members = [
     "crates/microcircuit_amygdala_stub",
     "crates/microcircuit_amygdala_pop",
     "crates/microcircuit_amygdala_biophys",
+    "crates/microcircuit_amygdala_l4",
     "crates/microcircuit_cerebellum_stub",
     "crates/microcircuit_cerebellum_pop",
     "crates/microcircuit_pag_stub",
