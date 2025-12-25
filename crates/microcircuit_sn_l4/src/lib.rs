@@ -460,12 +460,17 @@ impl SnL4Microcircuit {
         let events = self.queue.drain_current(self.state.step_count);
         for event in events {
             let synapse = &self.synapses[event.synapse_index];
-            let mut g_max_eff = self.syn_g_max_eff[event.synapse_index];
-            #[cfg(feature = "biophys-l4-ca-feedback")]
-            {
-                g_max_eff =
-                    apply_inhibitory_boost(g_max_eff, synapse.kind, self.inhibitory_boost_q);
-            }
+            let g_max_eff = {
+                let base = self.syn_g_max_eff[event.synapse_index];
+                #[cfg(feature = "biophys-l4-ca-feedback")]
+                {
+                    apply_inhibitory_boost(base, synapse.kind, self.inhibitory_boost_q)
+                }
+                #[cfg(not(feature = "biophys-l4-ca-feedback"))]
+                {
+                    base
+                }
+            };
             self.syn_states[event.synapse_index].apply_spike(
                 synapse.kind,
                 g_max_eff,
