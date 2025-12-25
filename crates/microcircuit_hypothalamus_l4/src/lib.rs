@@ -248,12 +248,11 @@ impl HypothalamusL4Microcircuit {
     fn winner_with_tiebreak(acc: &[i32; PROFILE_POOL_COUNT]) -> usize {
         let mut winner = IDX_P0;
         let mut best = acc[IDX_P0];
-        for idx in 1..PROFILE_POOL_COUNT {
-            let value = acc[idx];
+        for (idx, value) in acc.iter().enumerate().take(PROFILE_POOL_COUNT).skip(1) {
             let rank = Self::strictness_rank(idx);
             let best_rank = Self::strictness_rank(winner);
-            if value > best || (value == best && rank > best_rank) {
-                best = value;
+            if *value > best || (*value == best && rank > best_rank) {
+                best = *value;
                 winner = idx;
             }
         }
@@ -369,10 +368,10 @@ impl HypothalamusL4Microcircuit {
     fn build_inputs(&self, input: &HypoInput) -> [[f32; COMPARTMENT_COUNT]; NEURON_COUNT] {
         let mut currents = [[0.0_f32; COMPARTMENT_COUNT]; NEURON_COUNT];
         let drives = self.build_pool_drives(input);
-        for pool in 0..POOL_COUNT {
+        for (pool, drive) in drives.iter().enumerate().take(POOL_COUNT) {
             let (start, end) = Self::pool_bounds(pool);
-            for neuron in start..end {
-                currents[neuron][0] += drives[pool];
+            for neuron in currents.iter_mut().take(end).skip(start) {
+                neuron[0] += drive;
             }
         }
         currents
@@ -480,9 +479,9 @@ impl HypothalamusL4Microcircuit {
 
     fn update_pool_accumulators(&mut self, spike_counts: &[usize; NEURON_COUNT]) {
         let mut pool_spikes = [0usize; POOL_COUNT];
-        for pool in 0..POOL_COUNT {
+        for (pool, pool_spike) in pool_spikes.iter_mut().enumerate().take(POOL_COUNT) {
             let (start, end) = Self::pool_bounds(pool);
-            pool_spikes[pool] = spike_counts[start..end].iter().sum();
+            *pool_spike = spike_counts[start..end].iter().sum();
         }
 
         for (idx, spikes) in pool_spikes.iter().enumerate() {
@@ -656,9 +655,7 @@ impl MicrocircuitBackend<HypoInput, HypoOutput> for HypothalamusL4Microcircuit {
             profile = ProfileState::M3;
         }
 
-        if release_ready {
-            profile = ProfileState::M1;
-        } else if self.state.recovery_guard > 0 && matches!(profile, ProfileState::M0) {
+        if release_ready || (self.state.recovery_guard > 0 && matches!(profile, ProfileState::M0)) {
             profile = ProfileState::M1;
         }
 
