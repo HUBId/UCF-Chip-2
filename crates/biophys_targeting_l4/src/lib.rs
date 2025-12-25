@@ -98,9 +98,9 @@ fn pick_random_dendrite(
 mod tests {
     use super::*;
     use biophys_core::CompartmentId;
-    use biophys_morphology::{
-        compute_depths, morphology_tree, Compartment, CompartmentKind, NeuronMorphology,
-    };
+    #[cfg(feature = "biophys-l4-morphology-multi")]
+    use biophys_morphology::{compute_depths, morphology_tree};
+    use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
 
     fn test_morphology() -> NeuronMorphology {
         NeuronMorphology {
