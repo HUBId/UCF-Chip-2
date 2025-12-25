@@ -20,15 +20,10 @@ pub enum SynKind {
     GABA,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NmdaVDepMode {
+    #[default]
     PiecewiseLinear,
-}
-
-impl Default for NmdaVDepMode {
-    fn default() -> Self {
-        Self::PiecewiseLinear
-    }
 }
 
 #[allow(non_camel_case_types)]
@@ -381,7 +376,7 @@ fn syn_current_nmda(conductance: SynapseConductance, v: f32, nmda_vdep_mode: Nmd
     if g_eff_fixed == 0 {
         return 0.0;
     }
-    let g_e_rev_eff = (conductance.g_e_rev_fixed as i64 * alpha_q as i64) / 1000;
+    let g_e_rev_eff = (conductance.g_e_rev_fixed * alpha_q as i64) / 1000;
     let g = g_eff_fixed as f32 / FIXED_POINT_SCALE as f32;
     let g_e_rev = fixed_to_f32_i64(g_e_rev_eff);
     g_e_rev - g * v
