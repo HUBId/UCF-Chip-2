@@ -53,9 +53,21 @@ fn build_solver() -> (L4Solver, L4State) {
         CompartmentChannels {
             leak,
             nak: Some(nak),
+            #[cfg(feature = "biophys-l4-ca")]
+            ca: None,
         },
-        CompartmentChannels { leak, nak: None },
-        CompartmentChannels { leak, nak: None },
+        CompartmentChannels {
+            leak,
+            nak: None,
+            #[cfg(feature = "biophys-l4-ca")]
+            ca: None,
+        },
+        CompartmentChannels {
+            leak,
+            nak: None,
+            #[cfg(feature = "biophys-l4-ca")]
+            ca: None,
+        },
     ];
 
     let solver =

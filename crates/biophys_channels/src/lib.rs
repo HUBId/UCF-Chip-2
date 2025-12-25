@@ -21,6 +21,13 @@ pub struct GatingState {
     pub n: f32,
 }
 
+#[cfg(feature = "biophys-l4-ca")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CaLike {
+    pub g_ca: f32,
+    pub e_ca: f32,
+}
+
 impl GatingState {
     pub fn from_voltage(v: f32) -> Self {
         let m = m_inf(v);
@@ -49,6 +56,12 @@ pub fn nak_current(channel: NaK, gates: GatingState, v: f32) -> f32 {
     let i_na = channel.g_na * m3 * gates.h * (v - channel.e_na);
     let i_k = channel.g_k * n4 * (v - channel.e_k);
     i_na + i_k
+}
+
+#[cfg(feature = "biophys-l4-ca")]
+pub fn ca_current(channel: CaLike, p_ca_q: u16, v: f32) -> f32 {
+    let p_ca = p_ca_q as f32 / 1000.0;
+    channel.g_ca * p_ca * (channel.e_ca - v)
 }
 
 fn euler_update(x: f32, x_inf: f32, tau: f32, dt_ms: f32) -> f32 {
@@ -85,4 +98,41 @@ fn tau_h(v: f32) -> f32 {
 
 fn tau_n(v: f32) -> f32 {
     1.0 + 3.0 * (1.0 - linear_clamped(v, -55.0, -25.0))
+}
+
+#[cfg(feature = "biophys-l4-ca")]
+const CA_MIN_MV: i32 = -120;
+#[cfg(feature = "biophys-l4-ca")]
+const CA_MAX_MV: i32 = 60;
+#[cfg(feature = "biophys-l4-ca")]
+const CA_P_TABLE_LEN: usize = (CA_MAX_MV - CA_MIN_MV + 1) as usize;
+
+#[cfg(feature = "biophys-l4-ca")]
+const fn ca_p_table() -> [u16; CA_P_TABLE_LEN] {
+    let mut table = [0_u16; CA_P_TABLE_LEN];
+    let mut idx = 0;
+    while idx < CA_P_TABLE_LEN {
+        let v_mv = CA_MIN_MV + idx as i32;
+        let p_q = if v_mv <= -60 {
+            0
+        } else if v_mv >= -20 {
+            1000
+        } else {
+            ((v_mv + 60) * 1000 / 40) as u16
+        };
+        table[idx] = p_q;
+        idx += 1;
+    }
+    table
+}
+
+#[cfg(feature = "biophys-l4-ca")]
+const CA_P_TABLE: [u16; CA_P_TABLE_LEN] = ca_p_table();
+
+#[cfg(feature = "biophys-l4-ca")]
+pub fn ca_p_inf_q(v: f32) -> u16 {
+    let rounded = v.round() as i32;
+    let clamped = rounded.clamp(CA_MIN_MV, CA_MAX_MV);
+    let index = (clamped - CA_MIN_MV) as usize;
+    CA_P_TABLE[index]
 }

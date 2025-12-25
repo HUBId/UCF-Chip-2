@@ -7,5 +7,6 @@ edition = "2021"
 biophys = []
 biophys-l4 = ["biophys"]
 biophys-l4-synapses = ["biophys-l4"]
+biophys-l4-ca = ["biophys-l4"]
 
 [dependencies]

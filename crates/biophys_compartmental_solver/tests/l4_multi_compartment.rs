@@ -31,6 +31,8 @@ fn build_channels(morphology: &biophys_morphology::NeuronMorphology) -> Vec<Comp
             } else {
                 None
             },
+            #[cfg(feature = "biophys-l4-ca")]
+            ca: None,
         })
         .collect()
 }

@@ -9,6 +9,7 @@ biophys-l4 = ["biophys"]
 biophys-l4-synapses = ["biophys-l4", "dep:biophys_synapses_l4"]
 biophys-l4-nmda = ["biophys-l4-synapses", "biophys_synapses_l4/biophys-l4-nmda"]
 biophys-l4-morphology-multi = ["biophys-l4"]
+biophys-l4-ca = ["biophys-l4", "biophys_channels/biophys-l4-ca"]
 
 [dependencies]
 biophys_channels = { path = "../biophys_channels" }
