@@ -73,6 +73,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "biophys_asset_builder"
+version = "0.1.0"
+dependencies = [
+ "asset_rehydration",
+ "biophys_assets",
+ "thiserror",
+]
+
+[[package]]
 name = "biophys_assets"
 version = "0.1.0"
 dependencies = [
@@ -538,6 +547,10 @@ dependencies = [
 name = "microcircuit_amygdala_l4"
 version = "0.1.0"
 dependencies = [
+ "asset_chunker",
+ "asset_rehydration",
+ "biophys_asset_builder",
+ "biophys_assets",
  "biophys_channels",
  "biophys_compartmental_solver",
  "biophys_core",
@@ -551,6 +564,8 @@ dependencies = [
  "dbm_core",
  "microcircuit_amygdala_stub",
  "microcircuit_core",
+ "prost",
+ "ucf-protocol",
 ]
 
 [[package]]
@@ -866,6 +881,10 @@ dependencies = [
 name = "microcircuit_sn_l4"
 version = "0.1.0"
 dependencies = [
+ "asset_chunker",
+ "asset_rehydration",
+ "biophys_asset_builder",
+ "biophys_assets",
  "biophys_channels",
  "biophys_compartmental_solver",
  "biophys_core",
@@ -879,6 +898,7 @@ dependencies = [
  "dbm_core",
  "microcircuit_core",
  "microcircuit_sn_stub",
+ "ucf-protocol",
 ]
 
 [[package]]

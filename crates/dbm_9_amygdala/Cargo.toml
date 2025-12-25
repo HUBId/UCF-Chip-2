@@ -20,6 +20,10 @@ biophys-l4-amygdala = [
     "microcircuit_amygdala_l4/biophys-l4-amygdala",
     "biophys-l4-synapses",
 ]
+biophys-l4-amygdala-assets = [
+    "biophys-l4-amygdala",
+    "microcircuit_amygdala_l4/biophys-l4-amygdala-assets",
+]
 biophys-l4-homeostasis = [
     "biophys-l4-amygdala",
     "microcircuit_amygdala_l4/biophys-l4-homeostasis",
