@@ -1041,13 +1041,9 @@ fn build_synapses() -> Vec<SynapseL4> {
                     post_neuron_id: NeuronId(post as u32),
                     synapse_index: synapses.len() as u32,
                 };
-                let post_compartment = select_post_compartment(
-                    &morphologies[post],
-                    SynKind::AMPA,
-                    &policy,
-                    edge_key,
-                )
-                .0;
+                let post_compartment =
+                    select_post_compartment(&morphologies[post], SynKind::AMPA, &policy, edge_key)
+                        .0;
                 synapses.push(SynapseL4 {
                     pre_neuron: pre as u32,
                     post_neuron: post as u32,
@@ -1089,13 +1085,8 @@ fn build_synapses() -> Vec<SynapseL4> {
                 post_neuron_id: NeuronId(post as u32),
                 synapse_index: synapses.len() as u32,
             };
-            let post_compartment = select_post_compartment(
-                &morphologies[post],
-                SynKind::AMPA,
-                &policy,
-                edge_key,
-            )
-            .0;
+            let post_compartment =
+                select_post_compartment(&morphologies[post], SynKind::AMPA, &policy, edge_key).0;
             synapses.push(SynapseL4 {
                 pre_neuron: pre as u32,
                 post_neuron: post as u32,
@@ -1129,13 +1120,8 @@ fn build_synapses() -> Vec<SynapseL4> {
                 post_neuron_id: NeuronId(post as u32),
                 synapse_index: synapses.len() as u32,
             };
-            let post_compartment = select_post_compartment(
-                &morphologies[post],
-                SynKind::GABA,
-                &policy,
-                edge_key,
-            )
-            .0;
+            let post_compartment =
+                select_post_compartment(&morphologies[post], SynKind::GABA, &policy, edge_key).0;
             synapses.push(SynapseL4 {
                 pre_neuron: pre as u32,
                 post_neuron: post as u32,

@@ -220,9 +220,12 @@ mod tests {
             post_neuron_id: NeuronId(2),
             synapse_index: 1,
         };
-        let ampa_compartment = select_post_compartment(&morphology, SynKind::AMPA, &policy, edge_key);
-        let nmda_compartment = select_post_compartment(&morphology, SynKind::NMDA, &policy, edge_key);
-        let gaba_compartment = select_post_compartment(&morphology, SynKind::GABA, &policy, edge_key);
+        let ampa_compartment =
+            select_post_compartment(&morphology, SynKind::AMPA, &policy, edge_key);
+        let nmda_compartment =
+            select_post_compartment(&morphology, SynKind::NMDA, &policy, edge_key);
+        let gaba_compartment =
+            select_post_compartment(&morphology, SynKind::GABA, &policy, edge_key);
         assert_eq!(ampa_compartment, CompartmentId(1));
         assert_eq!(nmda_compartment, CompartmentId(2));
         assert_eq!(gaba_compartment, CompartmentId(0));
