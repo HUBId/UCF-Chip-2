@@ -35,7 +35,8 @@ impl L4State {
 pub struct L4Solver {
     morphology: NeuronMorphology,
     channels: Vec<CompartmentChannels>,
-    parent_indices: Vec<Option<usize>>,
+    children_indices: Vec<Vec<usize>>,
+    axial_currents: Vec<f32>,
     dt_ms: f32,
     clamp_min: f32,
     clamp_max: f32,
@@ -122,10 +123,20 @@ impl L4Solver {
             parent_indices.push(parent_index);
         }
 
+        let mut children_indices = vec![Vec::new(); morphology.compartments.len()];
+        for (index, parent_index) in parent_indices.iter().enumerate() {
+            if let Some(parent_index) = parent_index {
+                children_indices[*parent_index].push(index);
+            }
+        }
+
+        let axial_currents = vec![0.0_f32; morphology.compartments.len()];
+
         Ok(Self {
             morphology,
             channels,
-            parent_indices,
+            children_indices,
+            axial_currents,
             dt_ms,
             clamp_min,
             clamp_max,
@@ -157,15 +168,18 @@ impl L4Solver {
             gates.update(v, self.dt_ms);
         }
 
-        let mut axial_currents = vec![0.0_f32; self.morphology.compartments.len()];
-        for (index, compartment) in self.morphology.compartments.iter().enumerate() {
-            if let Some(parent_index) = self.parent_indices[index] {
-                let v_child = state.voltages[index];
+        for current in self.axial_currents.iter_mut() {
+            *current = 0.0;
+        }
+        for (parent_index, children) in self.children_indices.iter().enumerate() {
+            for &child_index in children {
+                let compartment = &self.morphology.compartments[child_index];
+                let v_child = state.voltages[child_index];
                 let v_parent = state.voltages[parent_index];
                 let resistance = compartment.axial_resistance.max(1e-6);
                 let current = (v_parent - v_child) / resistance;
-                axial_currents[index] += current;
-                axial_currents[parent_index] -= current;
+                self.axial_currents[child_index] += current;
+                self.axial_currents[parent_index] -= current;
             }
         }
 
@@ -178,7 +192,7 @@ impl L4Solver {
             if let Some(nak) = channels.nak {
                 ionic += nak_current(nak, gates, v);
             }
-            let axial = axial_currents[index];
+            let axial = self.axial_currents[index];
             let ext = input_current[index];
             let capacitance = compartment.capacitance.max(1e-6);
             let dv = self.dt_ms * (ext + axial - ionic) / capacitance;
@@ -216,15 +230,18 @@ impl L4Solver {
             gates.update(v, self.dt_ms);
         }
 
-        let mut axial_currents = vec![0.0_f32; self.morphology.compartments.len()];
-        for (index, compartment) in self.morphology.compartments.iter().enumerate() {
-            if let Some(parent_index) = self.parent_indices[index] {
-                let v_child = state.voltages[index];
+        for current in self.axial_currents.iter_mut() {
+            *current = 0.0;
+        }
+        for (parent_index, children) in self.children_indices.iter().enumerate() {
+            for &child_index in children {
+                let compartment = &self.morphology.compartments[child_index];
+                let v_child = state.voltages[child_index];
                 let v_parent = state.voltages[parent_index];
                 let resistance = compartment.axial_resistance.max(1e-6);
                 let current = (v_parent - v_child) / resistance;
-                axial_currents[index] += current;
-                axial_currents[parent_index] -= current;
+                self.axial_currents[child_index] += current;
+                self.axial_currents[parent_index] -= current;
             }
         }
 
@@ -237,7 +254,7 @@ impl L4Solver {
             if let Some(nak) = channels.nak {
                 ionic += nak_current(nak, gates, v);
             }
-            let axial = axial_currents[index];
+            let axial = self.axial_currents[index];
             let ext = input_current[index];
             let syn = synaptic[index].total_current(v);
             let capacitance = compartment.capacitance.max(1e-6);

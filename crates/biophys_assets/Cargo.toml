@@ -8,3 +8,6 @@ blake3 = "1"
 ucf = { package = "ucf-protocol", path = "../../ucf-protocol" }
 
 [dev-dependencies]
+
+[features]
+biophys-l4-morphology-multi = []

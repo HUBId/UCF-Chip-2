@@ -98,7 +98,9 @@ fn pick_random_dendrite(
 mod tests {
     use super::*;
     use biophys_core::CompartmentId;
-    use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
+    use biophys_morphology::{
+        compute_depths, morphology_tree, Compartment, CompartmentKind, NeuronMorphology,
+    };
 
     fn test_morphology() -> NeuronMorphology {
         NeuronMorphology {
@@ -229,5 +231,47 @@ mod tests {
         assert_eq!(ampa_compartment, CompartmentId(1));
         assert_eq!(nmda_compartment, CompartmentId(2));
         assert_eq!(gaba_compartment, CompartmentId(0));
+    }
+
+    #[test]
+    #[cfg(feature = "biophys-l4-morphology-multi")]
+    fn multi_compartment_targeting_selects_expected_depths() {
+        let morphology = morphology_tree(NeuronId(1), 15);
+        let policy = default_policy();
+        let edge_key = EdgeKey {
+            pre_neuron_id: NeuronId(3),
+            post_neuron_id: NeuronId(4),
+            synapse_index: 2,
+        };
+        let proximal = select_post_compartment(&morphology, SynKind::AMPA, &policy, edge_key);
+        let distal = select_post_compartment(&morphology, SynKind::NMDA, &policy, edge_key);
+
+        let depths = compute_depths(&morphology);
+        let prox_depth = depths[proximal.0 as usize];
+        let dist_depth = depths[distal.0 as usize];
+        let max_depth = *depths.iter().max().unwrap_or(&0);
+
+        assert_eq!(prox_depth, 1);
+        assert_eq!(dist_depth, max_depth);
+    }
+
+    #[test]
+    #[cfg(feature = "biophys-l4-morphology-multi")]
+    fn multi_compartment_random_deterministic_selects_dendrites() {
+        let morphology = morphology_tree(NeuronId(1), 7);
+        let policy = TargetingPolicy {
+            ampa_rule: TargetRule::RandomDeterministic,
+            nmda_rule: TargetRule::RandomDeterministic,
+            gaba_rule: TargetRule::RandomDeterministic,
+            seed_digest: *blake3::hash(b"UCF:L4:RANDOM:MULTI").as_bytes(),
+        };
+        let edge_key = EdgeKey {
+            pre_neuron_id: NeuronId(9),
+            post_neuron_id: NeuronId(10),
+            synapse_index: 5,
+        };
+        let selected = select_post_compartment(&morphology, SynKind::AMPA, &policy, edge_key);
+        let dendrites = dendrite_compartments(&morphology);
+        assert!(dendrites.contains(&selected));
     }
 }

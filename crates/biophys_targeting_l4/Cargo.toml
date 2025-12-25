@@ -7,6 +7,7 @@ edition = "2021"
 biophys = []
 biophys-l4 = ["biophys"]
 biophys-l4-targeting = ["biophys-l4"]
+biophys-l4-morphology-multi = ["biophys-l4"]
 
 [dependencies]
 biophys_core = { path = "../biophys_core", features = ["biophys", "biophys-l4"] }

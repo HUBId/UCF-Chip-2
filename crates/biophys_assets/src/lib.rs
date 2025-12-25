@@ -164,16 +164,37 @@ pub fn demo_morphology_3comp(neurons: u32) -> MorphologySet {
     }
 }
 
+pub fn morphology_tree(neurons: u32, compartments_per_neuron: u16) -> MorphologySet {
+    let mut morph_neurons = Vec::with_capacity(neurons as usize);
+    for neuron_id in 0..neurons {
+        let compartments = build_tree_compartments(compartments_per_neuron);
+        debug_assert!(compartments.len() <= MAX_COMPARTMENTS_PER_NEURON);
+        morph_neurons.push(MorphNeuron {
+            neuron_id,
+            compartments,
+        });
+    }
+    MorphologySet {
+        version: 1,
+        neurons: morph_neurons,
+    }
+}
+
 pub fn demo_channel_params(morph: &MorphologySet) -> ChannelParamsSet {
     let mut per_compartment = Vec::new();
     for neuron in &morph.neurons {
         for comp in &neuron.compartments {
+            let has_nak = comp.kind == CompartmentKind::Soma;
             per_compartment.push(ChannelParams {
                 neuron_id: neuron.neuron_id,
                 comp_id: comp.comp_id,
                 leak_g: 1 + (comp.comp_id as u16),
-                na_g: 2 + (neuron.neuron_id as u16 % 5),
-                k_g: 3 + (comp.comp_id as u16 % 4),
+                na_g: if has_nak {
+                    2 + (neuron.neuron_id as u16 % 5)
+                } else {
+                    0
+                },
+                k_g: if has_nak { 3 + (comp.comp_id as u16 % 4) } else { 0 },
             });
         }
     }
@@ -381,6 +402,96 @@ fn push_i32(bytes: &mut Vec<u8>, value: i32) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
+fn build_tree_compartments(compartments_per_neuron: u16) -> Vec<Compartment> {
+    let plan = tree_plan(compartments_per_neuron);
+    let mut compartments = Vec::with_capacity(plan.total as usize);
+    let mut next_id = 0u32;
+
+    compartments.push(Compartment {
+        comp_id: next_id,
+        parent: None,
+        kind: CompartmentKind::Soma,
+        length_um: length_for_depth(0),
+        diameter_um: diameter_for_depth(0),
+    });
+    next_id += 1;
+
+    let mut current_level = vec![0u32];
+    for depth in 1..=plan.depths {
+        let mut next_level = Vec::new();
+        let count = plan.children_per_depth[(depth - 1) as usize];
+        let mut parent_index = 0usize;
+        for _ in 0..count {
+            let parent_id = current_level[parent_index];
+            if !current_level.is_empty() {
+                parent_index = (parent_index + 1) % current_level.len();
+            }
+            let comp_id = next_id;
+            next_id += 1;
+            compartments.push(Compartment {
+                comp_id,
+                parent: Some(parent_id),
+                kind: CompartmentKind::Dendrite,
+                length_um: length_for_depth(depth),
+                diameter_um: diameter_for_depth(depth),
+            });
+            next_level.push(comp_id);
+        }
+        current_level = next_level;
+    }
+
+    debug_assert_eq!(compartments.len(), plan.total as usize);
+    debug_assert!(compartments.len() <= MAX_COMPARTMENTS_PER_NEURON);
+    debug_assert!(compartments
+        .iter()
+        .all(|comp| comp.comp_id < plan.total));
+    debug_assert!(compartments
+        .iter()
+        .all(|comp| comp.length_um > 0 && comp.diameter_um > 0));
+    debug_assert!(
+        compartments[0].length_um != 0 && compartments[0].diameter_um != 0,
+        "soma geometry must be set"
+    );
+
+    compartments
+}
+
+struct TreePlan {
+    total: u32,
+    depths: u16,
+    children_per_depth: Vec<u16>,
+}
+
+fn tree_plan(compartments_per_neuron: u16) -> TreePlan {
+    match compartments_per_neuron {
+        7 => TreePlan {
+            total: 7,
+            depths: 2,
+            children_per_depth: vec![2, 4],
+        },
+        15 => TreePlan {
+            total: 15,
+            depths: 3,
+            children_per_depth: vec![3, 6, 5],
+        },
+        _ => panic!("unsupported compartment count: {compartments_per_neuron}"),
+    }
+}
+
+fn length_for_depth(depth: u16) -> u16 {
+    let base = 10u16;
+    let step = 5u16;
+    let max = 60u16;
+    (base + depth.saturating_mul(step)).min(max)
+}
+
+fn diameter_for_depth(depth: u16) -> u16 {
+    let base = 12u16;
+    let step = 2u16;
+    let min = 3u16;
+    base.saturating_sub(depth.saturating_mul(step)).max(min)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +568,31 @@ mod tests {
         }
         for count in counts {
             assert!(count <= MAX_EDGES_PER_NEURON);
+        }
+    }
+
+    #[test]
+    fn morphology_tree_deterministic_digest() {
+        let morph = morphology_tree(2, 7);
+        let digest_a = morph.digest();
+        let digest_b = morph.digest();
+        assert_eq!(digest_a, digest_b);
+    }
+
+    #[test]
+    #[cfg(feature = "biophys-l4-morphology-multi")]
+    fn morphology_tree_canonical_bytes_deterministic() {
+        let bytes_a = morphology_tree(3, 15).to_canonical_bytes();
+        let bytes_b = morphology_tree(3, 15).to_canonical_bytes();
+        assert_eq!(bytes_a, bytes_b);
+    }
+
+    #[test]
+    fn morphology_tree_sizes_are_bounded() {
+        let morph = morphology_tree(4, 15);
+        for neuron in &morph.neurons {
+            assert!(neuron.compartments.len() <= MAX_COMPARTMENTS_PER_NEURON);
+            assert_eq!(neuron.compartments.len(), 15);
         }
     }
 }
