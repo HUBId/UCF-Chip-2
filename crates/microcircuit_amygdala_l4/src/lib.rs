@@ -737,7 +737,7 @@ fn build_synapses() -> Vec<SynapseL4> {
     for pool in 0..POOL_COUNT {
         let (start, end) = AmygdalaL4Microcircuit::pool_bounds(pool);
         for pre in start..end {
-            for post in start..end {
+            for (post, morphology) in morphologies.iter().enumerate().take(end).skip(start) {
                 if pre == post {
                     continue;
                 }
@@ -748,8 +748,7 @@ fn build_synapses() -> Vec<SynapseL4> {
                     synapse_index: synapses.len() as u32,
                 };
                 let post_compartment =
-                    select_post_compartment(&morphologies[post], SynKind::AMPA, &policy, edge_key)
-                        .0;
+                    select_post_compartment(morphology, SynKind::AMPA, &policy, edge_key).0;
                 synapses.push(SynapseL4 {
                     pre_neuron: pre as u32,
                     post_neuron: post as u32,
@@ -778,7 +777,12 @@ fn build_synapses() -> Vec<SynapseL4> {
     let (integrity_start, integrity_end) = AmygdalaL4Microcircuit::pool_bounds(IDX_INTEGRITY);
     let (exfil_start, exfil_end) = AmygdalaL4Microcircuit::pool_bounds(IDX_EXFIL);
     for pre in integrity_start..integrity_end {
-        for post in exfil_start..exfil_end {
+        for (post, morphology) in morphologies
+            .iter()
+            .enumerate()
+            .take(exfil_end)
+            .skip(exfil_start)
+        {
             let (stp_params, stp_state) = disabled_stp();
             let edge_key = EdgeKey {
                 pre_neuron_id: NeuronId(pre as u32),
@@ -786,7 +790,7 @@ fn build_synapses() -> Vec<SynapseL4> {
                 synapse_index: synapses.len() as u32,
             };
             let post_compartment =
-                select_post_compartment(&morphologies[post], SynKind::AMPA, &policy, edge_key).0;
+                select_post_compartment(morphology, SynKind::AMPA, &policy, edge_key).0;
             synapses.push(SynapseL4 {
                 pre_neuron: pre as u32,
                 post_neuron: post as u32,
@@ -845,7 +849,7 @@ fn build_synapses() -> Vec<SynapseL4> {
     }
 
     let pre = EXCITATORY_COUNT;
-    for post in 0..EXCITATORY_COUNT {
+    for (post, morphology) in morphologies.iter().enumerate().take(EXCITATORY_COUNT) {
         let (stp_params, stp_state) = disabled_stp();
         let edge_key = EdgeKey {
             pre_neuron_id: NeuronId(pre as u32),
@@ -853,7 +857,7 @@ fn build_synapses() -> Vec<SynapseL4> {
             synapse_index: synapses.len() as u32,
         };
         let post_compartment =
-            select_post_compartment(&morphologies[post], SynKind::GABA, &policy, edge_key).0;
+            select_post_compartment(morphology, SynKind::GABA, &policy, edge_key).0;
         synapses.push(SynapseL4 {
             pre_neuron: pre as u32,
             post_neuron: post as u32,
