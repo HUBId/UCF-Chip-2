@@ -10,6 +10,7 @@ biophys_core = { path = "../biophys_core", features = ["biophys", "biophys-l4"] 
 biophys = []
 biophys-l4 = ["biophys"]
 biophys-l4-synapses = ["biophys-l4"]
+biophys-l4-stp = ["biophys-l4-synapses"]
 biophys-l4-modulation = ["biophys-l4-synapses"]
 
 [dev-dependencies]

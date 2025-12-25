@@ -1,13 +1,12 @@
 #![cfg(all(
     feature = "biophys",
     feature = "biophys-l4",
-    feature = "biophys-l4-synapses",
-    feature = "biophys-l4-modulation"
+    feature = "biophys-l4-synapses"
 ))]
 
 use biophys_channels::Leak;
 use biophys_compartmental_solver::{CompartmentChannels, L4Solver, L4State};
-use biophys_core::ModChannel;
+use biophys_core::{ModChannel, STP_SCALE};
 use biophys_event_queue_l4::SpikeEventQueueL4;
 use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
 use biophys_synapses_l4::{
@@ -74,7 +73,7 @@ fn run_tick(
     let events = queue.drain_current(step);
     for event in events {
         let g_max = synapses[event.synapse_index].g_max_base_fixed();
-        syn_states[event.synapse_index].apply_spike(g_max);
+        syn_states[event.synapse_index].apply_spike(g_max, event.release_gain_q);
     }
 
     let mut accumulators = vec![vec![SynapseAccumulator::default(); 1]; neurons.len()];
@@ -105,7 +104,12 @@ fn run_tick(
 
     for spike_idx in &spikes {
         let indices = &pre_index[*spike_idx];
-        queue.schedule_spike(step, indices, |idx| synapses[idx].delay_steps);
+        queue.schedule_spike(
+            step,
+            indices,
+            |idx| synapses[idx].delay_steps,
+            |_| STP_SCALE,
+        );
     }
 
     spikes
@@ -137,6 +141,8 @@ fn delay_is_applied_to_synaptic_conductance() {
         tau_rise_ms: 0.0,
         tau_decay_ms: 8.0,
         delay_steps: 2,
+        stp_params: Default::default(),
+        stp_state: Default::default(),
     }];
     let mut syn_states = vec![SynapseState::default(); synapses.len()];
     let pre_index = build_pre_index(neurons.len(), &synapses);
@@ -184,6 +190,8 @@ fn deterministic_runs_match() {
         tau_rise_ms: 0.0,
         tau_decay_ms: 10.0,
         delay_steps: 1,
+        stp_params: Default::default(),
+        stp_state: Default::default(),
     }];
 
     let run = || {
@@ -230,7 +238,7 @@ fn deterministic_runs_match() {
 fn bounded_queue_drops_highest_indices() {
     let mut queue = SpikeEventQueueL4::new(0, 5);
     let synapse_indices: Vec<usize> = (0..10).collect();
-    queue.schedule_spike(0, &synapse_indices, |_| 0);
+    queue.schedule_spike(0, &synapse_indices, |_| 0, |_| STP_SCALE);
 
     let events = queue.drain_current(0);
     let delivered: Vec<usize> = events.iter().map(|event| event.synapse_index).collect();
@@ -251,6 +259,8 @@ fn synaptic_input_advances_spike_time() {
         tau_rise_ms: 0.0,
         tau_decay_ms: 12.0,
         delay_steps: 1,
+        stp_params: Default::default(),
+        stp_state: Default::default(),
     }];
 
     let simulate = |enable_synapse: bool| {
@@ -313,7 +323,7 @@ fn synapse_conductance_clamps_without_overflow() {
     let mut state = SynapseState::default();
 
     for _ in 0..5 {
-        state.apply_spike(u32::MAX);
+        state.apply_spike(u32::MAX, STP_SCALE);
         assert!(
             state.g_fixed <= max_fixed,
             "conductance should remain clamped"

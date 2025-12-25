@@ -6,7 +6,8 @@ use biophys_core::{CompartmentId, ModChannel, ModLevel, ModulatorField, NeuronId
 use biophys_event_queue_l4::SpikeEventQueueL4;
 use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
 use biophys_synapses_l4::{
-    decay_k, f32_to_fixed_u32, SynKind, SynapseAccumulator, SynapseL4, SynapseState,
+    decay_k, f32_to_fixed_u32, StpParamsL4, StpStateL4, SynKind, SynapseAccumulator, SynapseL4,
+    SynapseState,
 };
 use dbm_core::{
     DbmModule, DwmMode, IntegrityState, LevelClass, ReasonSet, SalienceItem, SalienceSource,
@@ -94,6 +95,7 @@ pub struct SnL4Microcircuit {
     syn_states: Vec<SynapseState>,
     syn_g_max_eff: Vec<u32>,
     syn_decay: Vec<u16>,
+    syn_stp_params_eff: Vec<StpParamsL4>,
     pre_index: Vec<Vec<usize>>,
     queue: SpikeEventQueueL4,
     state: SnL4State,
@@ -116,6 +118,10 @@ impl SnL4Microcircuit {
             .iter()
             .map(|synapse| decay_k(DT_MS, synapse.tau_decay_ms))
             .collect::<Vec<_>>();
+        let syn_stp_params_eff = synapses
+            .iter()
+            .map(|synapse| synapse.stp_effective_params(current_modulators))
+            .collect::<Vec<_>>();
         let pre_index = build_pre_index(NEURON_COUNT, &synapses);
         let max_delay = synapses
             .iter()
@@ -130,6 +136,7 @@ impl SnL4Microcircuit {
             syn_states,
             syn_g_max_eff,
             syn_decay,
+            syn_stp_params_eff,
             pre_index,
             queue,
             state: SnL4State::default(),
@@ -319,6 +326,7 @@ impl SnL4Microcircuit {
         self.current_modulators = mods;
         for (idx, synapse) in self.synapses.iter().enumerate() {
             self.syn_g_max_eff[idx] = synapse.effective_g_max_fixed(mods);
+            self.syn_stp_params_eff[idx] = synapse.stp_effective_params(mods);
         }
     }
 
@@ -330,7 +338,10 @@ impl SnL4Microcircuit {
         let events = self.queue.drain_current(self.state.step_count);
         for event in events {
             let g_max_eff = self.syn_g_max_eff[event.synapse_index];
-            self.syn_states[event.synapse_index].apply_spike(g_max_eff);
+            self.syn_states[event.synapse_index].apply_spike(
+                g_max_eff,
+                event.release_gain_q,
+            );
         }
 
         let mut accumulators =
@@ -367,9 +378,22 @@ impl SnL4Microcircuit {
         for spike_idx in &spikes {
             let indices = &self.pre_index[*spike_idx];
             self.queue
-                .schedule_spike(self.state.step_count, indices, |idx| {
-                    self.synapses[idx].delay_steps
-                });
+                .schedule_spike(
+                    self.state.step_count,
+                    indices,
+                    |idx| self.synapses[idx].delay_steps,
+                    |idx| {
+                        #[cfg(feature = "biophys-l4-stp")]
+                        {
+                            let params = self.syn_stp_params_eff[idx];
+                            return self.synapses[idx].stp_release_on_spike(params);
+                        }
+                        #[cfg(not(feature = "biophys-l4-stp"))]
+                        {
+                            return biophys_core::STP_SCALE;
+                        }
+                    },
+                );
         }
 
         self.state.step_count = self.state.step_count.saturating_add(1);
@@ -390,6 +414,11 @@ impl SnL4Microcircuit {
             .iter()
             .map(|synapse| decay_k(DT_MS, synapse.tau_decay_ms))
             .collect::<Vec<_>>();
+        self.syn_stp_params_eff = self
+            .synapses
+            .iter()
+            .map(|synapse| synapse.stp_effective_params(self.current_modulators))
+            .collect::<Vec<_>>();
         self.pre_index = build_pre_index(NEURON_COUNT, &self.synapses);
         let max_delay = self
             .synapses
@@ -405,6 +434,16 @@ impl MicrocircuitBackend<SnInput, SnOutput> for SnL4Microcircuit {
     fn step(&mut self, input: &SnInput, _now_ms: u64) -> SnOutput {
         self.state.tick_count = self.state.tick_count.saturating_add(1);
         self.update_modulators(input);
+        #[cfg(feature = "biophys-l4-stp")]
+        {
+            for (synapse, params) in self
+                .synapses
+                .iter_mut()
+                .zip(self.syn_stp_params_eff.iter().copied())
+            {
+                synapse.stp_recover_tick(params);
+            }
+        }
         let currents = Self::build_inputs(input);
 
         let mut spike_counts = [0usize; NEURON_COUNT];
@@ -614,6 +653,7 @@ fn build_synapses() -> Vec<SynapseL4> {
                     continue;
                 }
                 let delay = if (pre + post) % 2 == 0 { 1 } else { 2 };
+                let (stp_params, stp_state) = disabled_stp();
                 synapses.push(SynapseL4 {
                     pre_neuron: pre as u32,
                     post_neuron: post as u32,
@@ -625,6 +665,8 @@ fn build_synapses() -> Vec<SynapseL4> {
                     tau_rise_ms: AMPA_TAU_RISE_MS,
                     tau_decay_ms: AMPA_TAU_DECAY_MS,
                     delay_steps: delay,
+                    stp_params,
+                    stp_state,
                 });
             }
         }
@@ -633,6 +675,7 @@ fn build_synapses() -> Vec<SynapseL4> {
     for pre in 0..EXCITATORY_COUNT {
         for inh in 0..INHIBITORY_COUNT {
             let post = EXCITATORY_COUNT + inh;
+            let (stp_params, stp_state) = disabled_stp();
             synapses.push(SynapseL4 {
                 pre_neuron: pre as u32,
                 post_neuron: post as u32,
@@ -644,6 +687,8 @@ fn build_synapses() -> Vec<SynapseL4> {
                 tau_rise_ms: AMPA_TAU_RISE_MS,
                 tau_decay_ms: AMPA_TAU_DECAY_MS,
                 delay_steps: 1,
+                stp_params,
+                stp_state,
             });
         }
     }
@@ -651,6 +696,7 @@ fn build_synapses() -> Vec<SynapseL4> {
     for inh in 0..INHIBITORY_COUNT {
         let pre = EXCITATORY_COUNT + inh;
         for post in 0..EXCITATORY_COUNT {
+            let (stp_params, stp_state) = disabled_stp();
             synapses.push(SynapseL4 {
                 pre_neuron: pre as u32,
                 post_neuron: post as u32,
@@ -662,11 +708,19 @@ fn build_synapses() -> Vec<SynapseL4> {
                 tau_rise_ms: GABA_TAU_RISE_MS,
                 tau_decay_ms: GABA_TAU_DECAY_MS,
                 delay_steps: 1,
+                stp_params,
+                stp_state,
             });
         }
     }
 
     synapses
+}
+
+fn disabled_stp() -> (StpParamsL4, StpStateL4) {
+    let params = StpParamsL4::disabled();
+    let state = StpStateL4::new(params);
+    (params, state)
 }
 
 fn build_pre_index(neuron_count: usize, synapses: &[SynapseL4]) -> Vec<Vec<usize>> {

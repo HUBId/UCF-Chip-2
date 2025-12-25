@@ -10,6 +10,7 @@ path = "src/lib.rs"
 biophys = []
 biophys-l4 = ["biophys"]
 biophys-l4-synapses = ["biophys-l4"]
+biophys-l4-stp = ["biophys-l4-synapses"]
 biophys-l4-modulation = ["biophys-l4-synapses"]
 biophys-l4-amygdala = ["biophys-l4-synapses"]
 
@@ -17,9 +18,9 @@ biophys-l4-amygdala = ["biophys-l4-synapses"]
 biophys_channels = { path = "../biophys_channels", features = ["biophys", "biophys-l4", "biophys-l4-synapses"] }
 biophys_compartmental_solver = { path = "../biophys_compartmental_solver", features = ["biophys", "biophys-l4", "biophys-l4-synapses"] }
 biophys_core = { path = "../biophys_core", features = ["biophys", "biophys-l4"] }
-biophys_event_queue_l4 = { path = "../biophys_event_queue_l4", features = ["biophys", "biophys-l4", "biophys-l4-synapses"] }
+biophys_event_queue_l4 = { path = "../biophys_event_queue_l4", features = ["biophys", "biophys-l4", "biophys-l4-synapses", "biophys-l4-stp"] }
 biophys_morphology = { path = "../biophys_morphology", features = ["biophys", "biophys-l4"] }
-biophys_synapses_l4 = { path = "../biophys_synapses_l4", features = ["biophys", "biophys-l4", "biophys-l4-synapses", "biophys-l4-modulation"] }
+biophys_synapses_l4 = { path = "../biophys_synapses_l4", features = ["biophys", "biophys-l4", "biophys-l4-synapses", "biophys-l4-stp", "biophys-l4-modulation"] }
 blake3 = "1"
 dbm_core = { path = "../dbm_core" }
 microcircuit_amygdala_stub = { path = "../microcircuit_amygdala_stub" }

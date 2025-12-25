@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use biophys_core::{level_mul, ModChannel, ModulatorField};
+use biophys_core::{level_mul, ModChannel, ModulatorField, STP_SCALE};
+#[cfg(feature = "biophys-l4-modulation")]
+use biophys_core::ModLevel;
 
 pub const FIXED_POINT_SCALE: u32 = 1 << 16;
 const FIXED_POINT_SCALE_I64: i64 = 1 << 16;
@@ -15,6 +17,62 @@ pub enum SynKind {
     GABA,
 }
 
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StpMode {
+    STP_NONE = 0,
+    STP_TM = 1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StpParamsL4 {
+    pub mode: StpMode,
+    pub u_base_q: u16,
+    pub tau_rec_steps: u16,
+    pub tau_fac_steps: u16,
+}
+
+impl StpParamsL4 {
+    pub fn disabled() -> Self {
+        Self {
+            mode: StpMode::STP_NONE,
+            u_base_q: 0,
+            tau_rec_steps: 1,
+            tau_fac_steps: 1,
+        }
+    }
+}
+
+impl Default for StpParamsL4 {
+    fn default() -> Self {
+        Self::disabled()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StpStateL4 {
+    pub x_q: u16,
+    pub u_q: u16,
+}
+
+impl StpStateL4 {
+    pub fn new(params: StpParamsL4) -> Self {
+        Self {
+            x_q: STP_SCALE,
+            u_q: params.u_base_q.min(STP_SCALE),
+        }
+    }
+}
+
+impl Default for StpStateL4 {
+    fn default() -> Self {
+        Self {
+            x_q: STP_SCALE,
+            u_q: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SynapseL4 {
     pub pre_neuron: u32,
@@ -27,6 +85,8 @@ pub struct SynapseL4 {
     pub tau_rise_ms: f32,
     pub tau_decay_ms: f32,
     pub delay_steps: u16,
+    pub stp_params: StpParamsL4,
+    pub stp_state: StpStateL4,
 }
 
 impl SynapseL4 {
@@ -44,6 +104,69 @@ impl SynapseL4 {
     pub fn e_rev_fixed(&self) -> i32 {
         f32_to_fixed_i32(self.e_rev)
     }
+
+    pub fn stp_effective_params(&self, mods: ModulatorField) -> StpParamsL4 {
+        let mut params = self.stp_params;
+        if params.mode != StpMode::STP_TM {
+            return params;
+        }
+        #[cfg(not(feature = "biophys-l4-modulation"))]
+        let _mods = mods;
+        params.u_base_q = params.u_base_q.min(STP_SCALE);
+        params.tau_rec_steps = params.tau_rec_steps.max(1);
+        params.tau_fac_steps = params.tau_fac_steps.max(1);
+
+        #[cfg(feature = "biophys-l4-modulation")]
+        {
+            if mods.da == ModLevel::High {
+                params.u_base_q = params.u_base_q.saturating_add(50).min(STP_SCALE);
+            }
+            if mods.ht == ModLevel::High {
+                params.tau_rec_steps = params.tau_rec_steps.saturating_add(2).max(1);
+            }
+        }
+
+        params
+    }
+
+    pub fn stp_recover_tick(&mut self, params: StpParamsL4) {
+        if self.kind != SynKind::AMPA || params.mode != StpMode::STP_TM {
+            return;
+        }
+        let u_base = params.u_base_q.min(STP_SCALE);
+        let tau_rec = params.tau_rec_steps.max(1);
+        let tau_fac = params.tau_fac_steps.max(1);
+
+        let x_q = self.stp_state.x_q.min(STP_SCALE);
+        let increment = (STP_SCALE - x_q) as u32 / tau_rec as u32;
+        let x_next = (x_q as u32 + increment).min(STP_SCALE as u32) as u16;
+
+        let u_q = self.stp_state.u_q.min(STP_SCALE);
+        let delta = (u_base as i32 - u_q as i32) / tau_fac as i32;
+        let u_next = clamp_stp_q(u_q as i32 + delta);
+
+        self.stp_state.x_q = x_next;
+        self.stp_state.u_q = u_next;
+    }
+
+    pub fn stp_release_on_spike(&mut self, params: StpParamsL4) -> u16 {
+        if self.kind != SynKind::AMPA || params.mode != StpMode::STP_TM {
+            return STP_SCALE;
+        }
+        let u_base = params.u_base_q.min(STP_SCALE);
+        let mut u_q = self.stp_state.u_q.min(STP_SCALE);
+        let mut x_q = self.stp_state.x_q.min(STP_SCALE);
+
+        let delta_u = (u_base as u32 * (STP_SCALE - u_q) as u32) / STP_SCALE as u32;
+        u_q = (u_q as u32 + delta_u).min(STP_SCALE as u32) as u16;
+        let released_q = (u_q as u32 * x_q as u32) / STP_SCALE as u32;
+        x_q = x_q.saturating_sub(released_q as u16);
+
+        self.stp_state.u_q = u_q;
+        self.stp_state.x_q = x_q;
+
+        released_q.min(STP_SCALE as u32) as u16
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -52,10 +175,15 @@ pub struct SynapseState {
 }
 
 impl SynapseState {
-    pub fn apply_spike(&mut self, g_max_eff_fixed: u32) {
+    pub fn apply_spike(&mut self, g_max_eff_fixed: u32, release_gain_q: u16) {
         let max_fixed = max_synapse_g_fixed();
         let add_fixed = g_max_eff_fixed.min(max_fixed);
-        self.g_fixed = self.g_fixed.saturating_add(add_fixed).min(max_fixed);
+        let scaled_add =
+            (add_fixed as u64 * release_gain_q as u64) / STP_SCALE as u64;
+        self.g_fixed = self
+            .g_fixed
+            .saturating_add(scaled_add as u32)
+            .min(max_fixed);
     }
 
     pub fn decay(&mut self, decay_k: u16) {
@@ -165,4 +293,8 @@ fn mod_channel_multiplier(channel: ModChannel, kind: SynKind, mods: ModulatorFie
         },
         SynKind::NMDA => 100,
     }
+}
+
+fn clamp_stp_q(value: i32) -> u16 {
+    value.clamp(0, STP_SCALE as i32) as u16
 }

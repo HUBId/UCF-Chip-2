@@ -4,6 +4,7 @@
 pub struct SpikeEventL4 {
     pub deliver_step: u64,
     pub synapse_index: usize,
+    pub release_gain_q: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -23,13 +24,15 @@ impl SpikeEventQueueL4 {
         }
     }
 
-    pub fn schedule_spike<F>(
+    pub fn schedule_spike<F, G>(
         &mut self,
         current_step: u64,
         synapse_indices: &[usize],
         delay_steps_for: F,
+        mut release_gain_for: G,
     ) where
         F: Fn(usize) -> u16,
+        G: FnMut(usize) -> u16,
     {
         if synapse_indices.is_empty() {
             return;
@@ -46,6 +49,7 @@ impl SpikeEventQueueL4 {
             self.buckets[bucket].push(SpikeEventL4 {
                 deliver_step,
                 synapse_index,
+                release_gain_q: release_gain_for(synapse_index),
             });
         }
     }
