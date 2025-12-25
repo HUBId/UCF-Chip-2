@@ -163,7 +163,10 @@ impl AmygdalaL4Microcircuit {
     fn build_inputs(input: &AmyInput) -> [[f32; COMPARTMENT_COUNT]; NEURON_COUNT] {
         let mut currents = [[0.0_f32; COMPARTMENT_COUNT]; NEURON_COUNT];
 
-        let integrity_strong = matches!(input.integrity, IntegrityState::Fail | IntegrityState::Degraded);
+        let integrity_strong = matches!(
+            input.integrity,
+            IntegrityState::Fail | IntegrityState::Degraded
+        );
         let integrity_medium = input.replay_mismatch_present || input.receipt_invalid_medium >= 1;
         if integrity_strong {
             Self::apply_pool_current(&mut currents, IDX_INTEGRITY, CURRENT_STRONG, CURRENT_STRONG);
@@ -172,9 +175,8 @@ impl AmygdalaL4Microcircuit {
             Self::apply_pool_current(&mut currents, IDX_INTEGRITY, CURRENT_MED, CURRENT_MED);
         }
 
-        let exfil_strong = input.dlp_secret_present
-            || input.dlp_obfuscation_present
-            || input.dlp_stegano_present;
+        let exfil_strong =
+            input.dlp_secret_present || input.dlp_obfuscation_present || input.dlp_stegano_present;
         if exfil_strong {
             Self::apply_pool_current(&mut currents, IDX_EXFIL, CURRENT_STRONG, CURRENT_STRONG);
         }

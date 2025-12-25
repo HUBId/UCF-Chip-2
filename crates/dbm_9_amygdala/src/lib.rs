@@ -45,10 +45,7 @@ impl Amygdala {
         {
             Self::new_l4(CircuitConfig::default())
         }
-        #[cfg(all(
-            feature = "biophys-amygdala",
-            not(feature = "biophys-l4-amygdala")
-        ))]
+        #[cfg(all(feature = "biophys-amygdala", not(feature = "biophys-l4-amygdala")))]
         {
             Self::new_biophys(CircuitConfig::default())
         }
