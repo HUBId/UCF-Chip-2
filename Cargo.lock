@@ -188,6 +188,7 @@ version = "0.1.0"
 dependencies = [
  "dbm_core",
  "microcircuit_core",
+ "microcircuit_hypothalamus_l4",
  "microcircuit_hypothalamus_setpoint",
  "microcircuit_pag_stub",
  "microcircuit_pmrf_stub",
@@ -560,6 +561,24 @@ dependencies = [
  "dbm_core",
  "memristor_backend",
  "microcircuit_core",
+]
+
+[[package]]
+name = "microcircuit_hypothalamus_l4"
+version = "0.1.0"
+dependencies = [
+ "biophys_channels",
+ "biophys_compartmental_solver",
+ "biophys_core",
+ "biophys_event_queue_l4",
+ "biophys_morphology",
+ "biophys_synapses_l4",
+ "blake3",
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_hypothalamus_setpoint",
+ "microcircuit_pag_stub",
+ "microcircuit_pmrf_stub",
 ]
 
 [[package]]

@@ -8,10 +8,12 @@ path = "src/lib.rs"
 
 [features]
 microcircuit-hypothalamus-setpoint = []
+biophys-l4-hypothalamus = []
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_hypothalamus_setpoint = { path = "../microcircuit_hypothalamus_setpoint" }
+microcircuit_hypothalamus_l4 = { path = "../microcircuit_hypothalamus_l4", optional = true }
 microcircuit_pag_stub = { path = "../microcircuit_pag_stub" }
 microcircuit_pmrf_stub = { path = "../microcircuit_pmrf_stub" }
