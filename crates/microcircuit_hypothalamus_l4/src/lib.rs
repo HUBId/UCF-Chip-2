@@ -2,9 +2,7 @@
 
 use biophys_channels::{Leak, NaK};
 use biophys_compartmental_solver::{CompartmentChannels, L4Solver, L4State};
-use biophys_core::{
-    CompartmentId, ModChannel, ModLevel, ModulatorField, NeuronId, STP_SCALE,
-};
+use biophys_core::{CompartmentId, ModChannel, ModLevel, ModulatorField, NeuronId, STP_SCALE};
 use biophys_event_queue_l4::SpikeEventQueueL4;
 use biophys_morphology::{Compartment, CompartmentKind, NeuronMorphology};
 use biophys_synapses_l4::{
@@ -265,8 +263,7 @@ impl HypothalamusL4Microcircuit {
     fn apply_hysteresis(&mut self, raw_winner: usize) -> usize {
         for idx in 0..PROFILE_POOL_COUNT {
             if idx == raw_winner {
-                self.state.winner_streak[idx] =
-                    self.state.winner_streak[idx].saturating_add(1);
+                self.state.winner_streak[idx] = self.state.winner_streak[idx].saturating_add(1);
             } else {
                 self.state.winner_streak[idx] = 0;
             }
@@ -360,9 +357,7 @@ impl HypothalamusL4Microcircuit {
             drives[IDX_O_NOV] += CURRENT_STRONG;
         }
 
-        if input.unlock_present
-            && input.unlock_ready
-            && input.isv.integrity != IntegrityState::Fail
+        if input.unlock_present && input.unlock_ready && input.isv.integrity != IntegrityState::Fail
         {
             drives[IDX_P3] = (drives[IDX_P3] - UNLOCK_RELIEF).max(0.0);
             drives[IDX_P1] += UNLOCK_RELIEF;
@@ -530,7 +525,8 @@ impl HypothalamusL4Microcircuit {
             || Self::split_required(input.pmrf_sequence_mode)
             || input.isv.policy_pressure == LevelClass::High
             || input.baseline.chain_conservatism == LevelClass::High;
-        let export = Self::exfil_present(input) || input.baseline.export_strictness == LevelClass::High;
+        let export =
+            Self::exfil_present(input) || input.baseline.export_strictness == LevelClass::High;
         let novelty = input.isv.arousal == LevelClass::High
             || input.baseline.novelty_dampening == LevelClass::High;
         (simulate, export, novelty)
@@ -544,7 +540,8 @@ impl HypothalamusL4Microcircuit {
             novelty_lock: self.state.pool_acc[IDX_O_NOV] >= 60 || nov_trigger,
         };
 
-        if profile == ProfileState::M3 || profile == ProfileState::M2 || self.state.forensic_latched {
+        if profile == ProfileState::M3 || profile == ProfileState::M2 || self.state.forensic_latched
+        {
             overlays = OverlaySet::all_enabled();
         }
 
@@ -1110,11 +1107,7 @@ mod tests {
                 .map(|input| {
                     let output = circuit.step(input, input.now_ms);
                     let digest = circuit.snapshot_digest();
-                    assert!(output
-                        .reason_codes
-                        .codes
-                        .windows(2)
-                        .all(|w| w[0] <= w[1]));
+                    assert!(output.reason_codes.codes.windows(2).all(|w| w[0] <= w[1]));
                     (output, digest)
                 })
                 .collect()

@@ -96,9 +96,9 @@ impl Hypothalamus {
             use microcircuit_hypothalamus_l4::HypothalamusL4Microcircuit;
 
             return Self {
-                backend: HypothalamusBackend::Micro(Box::new(
-                    HypothalamusL4Microcircuit::new(CircuitConfig::default()),
-                )),
+                backend: HypothalamusBackend::Micro(Box::new(HypothalamusL4Microcircuit::new(
+                    CircuitConfig::default(),
+                ))),
             };
         }
 
