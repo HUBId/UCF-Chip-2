@@ -190,11 +190,12 @@ impl InsulaL4Microcircuit {
             LevelClass::Low => CURRENT_BASE,
         };
         Self::apply_pool_soma_current(&mut currents, IDX_THREAT, threat_current);
-        if input
-            .threat_vectors
-            .iter()
-            .any(|vector| matches!(vector, ThreatVector::Exfil | ThreatVector::IntegrityCompromise))
-        {
+        if input.threat_vectors.iter().any(|vector| {
+            matches!(
+                vector,
+                ThreatVector::Exfil | ThreatVector::IntegrityCompromise
+            )
+        }) {
             Self::apply_pool_current(&mut currents, IDX_THREAT, 0.0, CURRENT_LOW);
         }
 
