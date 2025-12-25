@@ -343,12 +343,7 @@ impl SnL4Microcircuit {
         }
     }
 
-    fn set_learning_context(
-        &mut self,
-        in_replay: bool,
-        mods: ModulatorField,
-        reward_block: bool,
-    ) {
+    fn set_learning_context(&mut self, in_replay: bool, mods: ModulatorField, reward_block: bool) {
         self.in_replay_mode = in_replay;
         if !cfg!(feature = "biophys-l4-plasticity") {
             self.learning_enabled = false;
@@ -439,7 +434,10 @@ impl SnL4Microcircuit {
 
     fn update_stdp_traces(&mut self, spikes: &[usize]) {
         for trace in &mut self.stdp_traces {
-            trace.decay_tick(self.stdp_config.tau_plus_steps, self.stdp_config.tau_minus_steps);
+            trace.decay_tick(
+                self.stdp_config.tau_plus_steps,
+                self.stdp_config.tau_minus_steps,
+            );
         }
         for &idx in spikes {
             if let Some(trace) = self.stdp_traces.get_mut(idx) {
@@ -513,7 +511,11 @@ impl MicrocircuitBackend<SnInput, SnOutput> for SnL4Microcircuit {
     fn step(&mut self, input: &SnInput, _now_ms: u64) -> SnOutput {
         self.state.tick_count = self.state.tick_count.saturating_add(1);
         self.update_modulators(input);
-        self.set_learning_context(input.replay_hint, self.current_modulators, input.reward_block);
+        self.set_learning_context(
+            input.replay_hint,
+            self.current_modulators,
+            input.reward_block,
+        );
         #[cfg(feature = "biophys-l4-stp")]
         {
             for (synapse, params) in self

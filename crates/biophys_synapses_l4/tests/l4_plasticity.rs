@@ -66,7 +66,12 @@ impl PlasticityHarness {
                     *flag = true;
                 }
             }
-            apply_stdp_updates(&mut self.synapses, &self.spike_flags, &self.traces, self.config);
+            apply_stdp_updates(
+                &mut self.synapses,
+                &self.spike_flags,
+                &self.traces,
+                self.config,
+            );
         }
         self.step_count = self.step_count.saturating_add(1);
     }
@@ -119,7 +124,14 @@ fn deterministic_runs_match_and_digest_is_stable() {
 
     let run = || {
         let mut harness = PlasticityHarness::new(2, synapses.clone(), config);
-        harness.set_learning_context(false, ModulatorField { da: ModLevel::High, ..Default::default() }, false);
+        harness.set_learning_context(
+            false,
+            ModulatorField {
+                da: ModLevel::High,
+                ..Default::default()
+            },
+            false,
+        );
         for tick in &spikes {
             harness.tick(tick);
         }
@@ -148,13 +160,27 @@ fn replay_only_gate_controls_learning() {
     let synapses = vec![build_synapse(0, 1, 2.0, 0.0, 10.0)];
 
     let mut no_replay = PlasticityHarness::new(2, synapses.clone(), config);
-    no_replay.set_learning_context(false, ModulatorField { da: ModLevel::High, ..Default::default() }, false);
+    no_replay.set_learning_context(
+        false,
+        ModulatorField {
+            da: ModLevel::High,
+            ..Default::default()
+        },
+        false,
+    );
     no_replay.tick(&[0]);
     no_replay.tick(&[1]);
     let weight_no_replay = no_replay.synapses[0].g_max_base_q;
 
     let mut replay = PlasticityHarness::new(2, synapses, config);
-    replay.set_learning_context(true, ModulatorField { da: ModLevel::High, ..Default::default() }, false);
+    replay.set_learning_context(
+        true,
+        ModulatorField {
+            da: ModLevel::High,
+            ..Default::default()
+        },
+        false,
+    );
     replay.tick(&[0]);
     replay.tick(&[1]);
     let weight_replay = replay.synapses[0].g_max_base_q;
@@ -178,13 +204,27 @@ fn dopamine_gate_blocks_learning() {
     let synapses = vec![build_synapse(0, 1, 2.0, 0.0, 10.0)];
 
     let mut low_da = PlasticityHarness::new(2, synapses.clone(), config);
-    low_da.set_learning_context(false, ModulatorField { da: ModLevel::Low, ..Default::default() }, false);
+    low_da.set_learning_context(
+        false,
+        ModulatorField {
+            da: ModLevel::Low,
+            ..Default::default()
+        },
+        false,
+    );
     low_da.tick(&[0]);
     low_da.tick(&[1]);
     let weight_low = low_da.synapses[0].g_max_base_q;
 
     let mut high_da = PlasticityHarness::new(2, synapses, config);
-    high_da.set_learning_context(false, ModulatorField { da: ModLevel::High, ..Default::default() }, false);
+    high_da.set_learning_context(
+        false,
+        ModulatorField {
+            da: ModLevel::High,
+            ..Default::default()
+        },
+        false,
+    );
     high_da.tick(&[0]);
     high_da.tick(&[1]);
     let weight_high = high_da.synapses[0].g_max_base_q;
@@ -236,7 +276,14 @@ fn weights_stay_within_bounds() {
     };
     let synapses = vec![build_synapse(0, 1, 1.0, 0.5, 1.0)];
     let mut harness = PlasticityHarness::new(2, synapses, config);
-    harness.set_learning_context(false, ModulatorField { da: ModLevel::High, ..Default::default() }, false);
+    harness.set_learning_context(
+        false,
+        ModulatorField {
+            da: ModLevel::High,
+            ..Default::default()
+        },
+        false,
+    );
 
     for _ in 0..5 {
         harness.tick(&[0]);
@@ -270,7 +317,14 @@ fn stdp_is_directional_for_pre_post_pairing() {
 
     let synapses = vec![build_synapse(0, 1, 2.0, 0.0, 10.0)];
     let mut paired = PlasticityHarness::new(2, synapses.clone(), config);
-    paired.set_learning_context(false, ModulatorField { da: ModLevel::High, ..Default::default() }, false);
+    paired.set_learning_context(
+        false,
+        ModulatorField {
+            da: ModLevel::High,
+            ..Default::default()
+        },
+        false,
+    );
     for _ in 0..5 {
         paired.tick(&[0]);
         paired.tick(&[1]);
@@ -278,7 +332,14 @@ fn stdp_is_directional_for_pre_post_pairing() {
     let paired_weight = paired.synapses[0].g_max_base_q;
 
     let mut post_only = PlasticityHarness::new(2, synapses, config);
-    post_only.set_learning_context(false, ModulatorField { da: ModLevel::High, ..Default::default() }, false);
+    post_only.set_learning_context(
+        false,
+        ModulatorField {
+            da: ModLevel::High,
+            ..Default::default()
+        },
+        false,
+    );
     for _ in 0..5 {
         post_only.tick(&[1]);
     }

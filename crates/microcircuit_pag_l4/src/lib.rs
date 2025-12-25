@@ -259,12 +259,7 @@ impl PagL4Microcircuit {
         }
     }
 
-    fn set_learning_context(
-        &mut self,
-        in_replay: bool,
-        mods: ModulatorField,
-        reward_block: bool,
-    ) {
+    fn set_learning_context(&mut self, in_replay: bool, mods: ModulatorField, reward_block: bool) {
         self.in_replay_mode = in_replay;
         if !cfg!(feature = "biophys-l4-plasticity") {
             self.learning_enabled = false;
@@ -355,7 +350,10 @@ impl PagL4Microcircuit {
 
     fn update_stdp_traces(&mut self, spikes: &[usize]) {
         for trace in &mut self.stdp_traces {
-            trace.decay_tick(self.stdp_config.tau_plus_steps, self.stdp_config.tau_minus_steps);
+            trace.decay_tick(
+                self.stdp_config.tau_plus_steps,
+                self.stdp_config.tau_minus_steps,
+            );
         }
         for &idx in spikes {
             if let Some(trace) = self.stdp_traces.get_mut(idx) {

@@ -231,9 +231,7 @@ pub fn apply_stdp_updates(
         let dw_q = (config.a_minus_q as u32 * post_trace) / scale;
         let dw_g_q = dw_q << STDP_WEIGHT_SHIFT;
         let updated = synapse.g_max_base_q.saturating_sub(dw_g_q);
-        synapse.g_max_base_q = updated
-            .max(synapse.g_max_min_q)
-            .min(synapse.g_max_max_q);
+        synapse.g_max_base_q = updated.max(synapse.g_max_min_q).min(synapse.g_max_max_q);
     }
     for synapse in synapses.iter_mut() {
         if !synapse.stdp_enabled {
@@ -254,9 +252,7 @@ pub fn apply_stdp_updates(
         let dw_q = (config.a_plus_q as u32 * pre_trace) / scale;
         let dw_g_q = dw_q << STDP_WEIGHT_SHIFT;
         let updated = synapse.g_max_base_q.saturating_add(dw_g_q);
-        synapse.g_max_base_q = updated
-            .max(synapse.g_max_min_q)
-            .min(synapse.g_max_max_q);
+        synapse.g_max_base_q = updated.max(synapse.g_max_min_q).min(synapse.g_max_max_q);
     }
 }
 
