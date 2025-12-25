@@ -19,6 +19,7 @@ biophys-l4-stp = ["biophys-l4-synapses"]
 biophys-l4-modulation = ["biophys-l4-synapses"]
 biophys-l4-plasticity = ["biophys-l4-synapses", "biophys_synapses_l4/biophys-l4-plasticity"]
 biophys-l4-homeostasis = ["biophys-l4-synapses", "biophys_homeostasis_l4/biophys-l4-homeostasis"]
+biophys-l4-targeting = ["biophys-l4-synapses", "biophys_targeting_l4/biophys-l4-targeting"]
 biophys-l4-pag = ["biophys-l4-synapses"]
 
 [dependencies]
@@ -30,6 +31,7 @@ biophys_homeostasis_l4 = { path = "../biophys_homeostasis_l4", features = ["biop
 biophys_morphology = { path = "../biophys_morphology", features = ["biophys", "biophys-l4"] }
 biophys_plasticity_l4 = { path = "../biophys_plasticity_l4" }
 biophys_synapses_l4 = { path = "../biophys_synapses_l4", features = ["biophys", "biophys-l4", "biophys-l4-synapses", "biophys-l4-stp", "biophys-l4-modulation"] }
+biophys_targeting_l4 = { path = "../biophys_targeting_l4", features = ["biophys", "biophys-l4", "biophys-l4-targeting"] }
 blake3 = "1"
 dbm_core = { path = "../dbm_core" }
 microcircuit_core = { path = "../microcircuit_core" }

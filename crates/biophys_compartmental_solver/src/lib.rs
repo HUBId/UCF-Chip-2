@@ -2,11 +2,11 @@
 
 use biophys_channels::{leak_current, nak_current, GatingState, Leak, NaK};
 use biophys_core::{CompartmentId, NeuronId};
-use biophys_morphology::{Compartment, CompartmentKind, MorphologyError, NeuronMorphology};
+use biophys_morphology::{
+    Compartment, CompartmentKind, MorphologyError, NeuronMorphology, MAX_COMPARTMENTS,
+};
 #[cfg(feature = "biophys-l4-synapses")]
 use biophys_synapses_l4::SynapseAccumulator;
-
-pub const MAX_COMPARTMENTS: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CompartmentChannels {
@@ -263,6 +263,7 @@ impl L4Solver {
             update_u32(&mut hasher, compartment.id.0);
             update_u32(&mut hasher, compartment.parent.map_or(u32::MAX, |id| id.0));
             update_u8(&mut hasher, compartment_kind_code(compartment.kind));
+            update_u32(&mut hasher, compartment.depth);
             update_f32(&mut hasher, compartment.capacitance);
             update_f32(&mut hasher, compartment.axial_resistance);
             update_f32(&mut hasher, channels.leak.g);
@@ -302,6 +303,7 @@ fn compartment_kind_code(kind: CompartmentKind) -> u8 {
     match kind {
         CompartmentKind::Soma => 0,
         CompartmentKind::Dendrite => 1,
+        CompartmentKind::Axon => 2,
     }
 }
 

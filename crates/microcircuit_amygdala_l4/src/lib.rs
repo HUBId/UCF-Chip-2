@@ -13,6 +13,7 @@ use biophys_synapses_l4::{
     apply_stdp_updates, decay_k, f32_to_fixed_u32, max_synapse_g_fixed, NmdaVDepMode, StpParamsL4,
     StpStateL4, SynKind, SynapseAccumulator, SynapseL4, SynapseState,
 };
+use biophys_targeting_l4::{select_post_compartment, EdgeKey, TargetRule, TargetingPolicy};
 use dbm_core::{IntegrityState, LevelClass, ReasonSet, ThreatVector};
 use microcircuit_amygdala_stub::{AmyInput, AmyOutput};
 use microcircuit_core::{CircuitConfig, MicrocircuitBackend};
@@ -649,12 +650,13 @@ impl MicrocircuitBackend<AmyInput, AmyOutput> for AmygdalaL4Microcircuit {
     }
 }
 
-fn build_neuron(neuron_id: u32) -> L4Neuron {
+fn build_morphology(neuron_id: u32) -> NeuronMorphology {
     let compartments = vec![
         Compartment {
             id: CompartmentId(0),
             parent: None,
             kind: CompartmentKind::Soma,
+            depth: 0,
             capacitance: 1.0,
             axial_resistance: 150.0,
         },
@@ -662,6 +664,7 @@ fn build_neuron(neuron_id: u32) -> L4Neuron {
             id: CompartmentId(1),
             parent: Some(CompartmentId(0)),
             kind: CompartmentKind::Dendrite,
+            depth: 1,
             capacitance: 1.2,
             axial_resistance: 200.0,
         },
@@ -669,15 +672,29 @@ fn build_neuron(neuron_id: u32) -> L4Neuron {
             id: CompartmentId(2),
             parent: Some(CompartmentId(0)),
             kind: CompartmentKind::Dendrite,
+            depth: 1,
             capacitance: 1.2,
             axial_resistance: 200.0,
         },
     ];
 
-    let morphology = NeuronMorphology {
+    NeuronMorphology {
         neuron_id: NeuronId(neuron_id),
         compartments,
-    };
+    }
+}
+
+fn default_targeting_policy() -> TargetingPolicy {
+    TargetingPolicy {
+        ampa_rule: TargetRule::ProximalDendrite,
+        nmda_rule: TargetRule::DistalDendrite,
+        gaba_rule: TargetRule::SomaOnly,
+        seed_digest: *blake3::hash(b"UCF:L4:TARGETING:AMYGDALA").as_bytes(),
+    }
+}
+
+fn build_neuron(neuron_id: u32) -> L4Neuron {
+    let morphology = build_morphology(neuron_id);
 
     let leak = Leak {
         g: 0.1,
@@ -712,19 +729,30 @@ fn build_neuron(neuron_id: u32) -> L4Neuron {
 
 fn build_synapses() -> Vec<SynapseL4> {
     let mut synapses = Vec::new();
+    let morphologies = (0..NEURON_COUNT)
+        .map(|idx| build_morphology(idx as u32))
+        .collect::<Vec<_>>();
+    let policy = default_targeting_policy();
 
     for pool in 0..POOL_COUNT {
         let (start, end) = AmygdalaL4Microcircuit::pool_bounds(pool);
         for pre in start..end {
-            for post in start..end {
+            for (post, morphology) in morphologies.iter().enumerate().take(end).skip(start) {
                 if pre == post {
                     continue;
                 }
                 let (stp_params, stp_state) = disabled_stp();
+                let edge_key = EdgeKey {
+                    pre_neuron_id: NeuronId(pre as u32),
+                    post_neuron_id: NeuronId(post as u32),
+                    synapse_index: synapses.len() as u32,
+                };
+                let post_compartment =
+                    select_post_compartment(morphology, SynKind::AMPA, &policy, edge_key).0;
                 synapses.push(SynapseL4 {
                     pre_neuron: pre as u32,
                     post_neuron: post as u32,
-                    post_compartment: 1,
+                    post_compartment,
                     kind: SynKind::AMPA,
                     mod_channel: ModChannel::NaDa,
                     g_max_base_q: f32_to_fixed_u32(AMPA_G_MAX),
@@ -749,12 +777,24 @@ fn build_synapses() -> Vec<SynapseL4> {
     let (integrity_start, integrity_end) = AmygdalaL4Microcircuit::pool_bounds(IDX_INTEGRITY);
     let (exfil_start, exfil_end) = AmygdalaL4Microcircuit::pool_bounds(IDX_EXFIL);
     for pre in integrity_start..integrity_end {
-        for post in exfil_start..exfil_end {
+        for (post, morphology) in morphologies
+            .iter()
+            .enumerate()
+            .take(exfil_end)
+            .skip(exfil_start)
+        {
             let (stp_params, stp_state) = disabled_stp();
+            let edge_key = EdgeKey {
+                pre_neuron_id: NeuronId(pre as u32),
+                post_neuron_id: NeuronId(post as u32),
+                synapse_index: synapses.len() as u32,
+            };
+            let post_compartment =
+                select_post_compartment(morphology, SynKind::AMPA, &policy, edge_key).0;
             synapses.push(SynapseL4 {
                 pre_neuron: pre as u32,
                 post_neuron: post as u32,
-                post_compartment: 1,
+                post_compartment,
                 kind: SynKind::AMPA,
                 mod_channel: ModChannel::NaDa,
                 g_max_base_q: f32_to_fixed_u32(AMPA_G_MAX_WEAK),
@@ -778,10 +818,17 @@ fn build_synapses() -> Vec<SynapseL4> {
     for pre in 0..EXCITATORY_COUNT {
         let post = EXCITATORY_COUNT;
         let (stp_params, stp_state) = disabled_stp();
+        let edge_key = EdgeKey {
+            pre_neuron_id: NeuronId(pre as u32),
+            post_neuron_id: NeuronId(post as u32),
+            synapse_index: synapses.len() as u32,
+        };
+        let post_compartment =
+            select_post_compartment(&morphologies[post], SynKind::AMPA, &policy, edge_key).0;
         synapses.push(SynapseL4 {
             pre_neuron: pre as u32,
             post_neuron: post as u32,
-            post_compartment: 0,
+            post_compartment,
             kind: SynKind::AMPA,
             mod_channel: ModChannel::Na,
             g_max_base_q: f32_to_fixed_u32(AMPA_G_MAX),
@@ -802,12 +849,19 @@ fn build_synapses() -> Vec<SynapseL4> {
     }
 
     let pre = EXCITATORY_COUNT;
-    for post in 0..EXCITATORY_COUNT {
+    for (post, morphology) in morphologies.iter().enumerate().take(EXCITATORY_COUNT) {
         let (stp_params, stp_state) = disabled_stp();
+        let edge_key = EdgeKey {
+            pre_neuron_id: NeuronId(pre as u32),
+            post_neuron_id: NeuronId(post as u32),
+            synapse_index: synapses.len() as u32,
+        };
+        let post_compartment =
+            select_post_compartment(morphology, SynKind::GABA, &policy, edge_key).0;
         synapses.push(SynapseL4 {
             pre_neuron: pre as u32,
             post_neuron: post as u32,
-            post_compartment: 0,
+            post_compartment,
             kind: SynKind::GABA,
             mod_channel: ModChannel::Ht,
             g_max_base_q: f32_to_fixed_u32(GABA_G_MAX),
