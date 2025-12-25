@@ -105,7 +105,10 @@ fn ca_like_determinism_and_bounds() {
     }
     for v in voltages_a {
         assert!(v.is_finite(), "voltage should be finite");
-        assert!((CLAMP_MIN..=CLAMP_MAX).contains(&v), "voltage should be clamped");
+        assert!(
+            (CLAMP_MIN..=CLAMP_MAX).contains(&v),
+            "voltage should be clamped"
+        );
     }
 }
 
@@ -114,8 +117,18 @@ fn ca_like_spike_marker_and_gating_behavior() {
     let (trace_strong, spikes_strong, _) = run_simulation(80.0, 200);
     let (trace_none, spikes_none, _) = run_simulation(0.0, 200);
 
-    let first = trace_strong.first().expect("trace").first().copied().unwrap_or(0);
-    let last = trace_strong.last().expect("trace").first().copied().unwrap_or(0);
+    let first = trace_strong
+        .first()
+        .expect("trace")
+        .first()
+        .copied()
+        .unwrap_or(0);
+    let last = trace_strong
+        .last()
+        .expect("trace")
+        .first()
+        .copied()
+        .unwrap_or(0);
     assert!(
         last > first,
         "p_ca_q should increase with strong distal injection"

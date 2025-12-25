@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
-use biophys_channels::{leak_current, nak_current, GatingState, Leak, NaK};
 #[cfg(feature = "biophys-l4-ca")]
 use biophys_channels::{ca_current, ca_p_inf_q, CaLike};
+use biophys_channels::{leak_current, nak_current, GatingState, Leak, NaK};
 use biophys_core::{CompartmentId, NeuronId};
 use biophys_morphology::{
     Compartment, CompartmentKind, MorphologyError, NeuronMorphology, MAX_COMPARTMENTS,
@@ -187,11 +187,7 @@ impl L4Solver {
         self.step_with_output(state, input_current);
     }
 
-    pub fn step_with_output(
-        &mut self,
-        state: &mut L4State,
-        input_current: &[f32],
-    ) -> L4StepOutput {
+    pub fn step_with_output(&mut self, state: &mut L4State, input_current: &[f32]) -> L4StepOutput {
         assert_eq!(
             state.voltages.len(),
             self.morphology.compartments.len(),
@@ -239,8 +235,8 @@ impl L4Solver {
                 if is_distal(compartment.depth, self.max_depth) {
                     let p_inf_q = ca_p_inf_q(v);
                     let current_q = state.p_ca_q[index] as i32;
-                    let updated_q = (current_q + (p_inf_q as i32 - current_q) / TAU_CA_STEPS)
-                        .clamp(0, 1000);
+                    let updated_q =
+                        (current_q + (p_inf_q as i32 - current_q) / TAU_CA_STEPS).clamp(0, 1000);
                     state.p_ca_q[index] = updated_q as u16;
                     ionic += ca_current(ca, state.p_ca_q[index], v);
                 }
@@ -340,8 +336,8 @@ impl L4Solver {
                 if is_distal(compartment.depth, self.max_depth) {
                     let p_inf_q = ca_p_inf_q(v);
                     let current_q = state.p_ca_q[index] as i32;
-                    let updated_q = (current_q + (p_inf_q as i32 - current_q) / TAU_CA_STEPS)
-                        .clamp(0, 1000);
+                    let updated_q =
+                        (current_q + (p_inf_q as i32 - current_q) / TAU_CA_STEPS).clamp(0, 1000);
                     state.p_ca_q[index] = updated_q as u16;
                     ionic += ca_current(ca, state.p_ca_q[index], v);
                 }
