@@ -299,6 +299,7 @@ dependencies = [
  "microcircuit_core",
  "microcircuit_pag_attractor",
  "microcircuit_pag_biophys",
+ "microcircuit_pag_l4",
  "microcircuit_pag_stub",
 ]
 
@@ -649,6 +650,22 @@ version = "0.1.0"
 dependencies = [
  "biophys_core",
  "biophys_runtime",
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_pag_stub",
+]
+
+[[package]]
+name = "microcircuit_pag_l4"
+version = "0.1.0"
+dependencies = [
+ "biophys_channels",
+ "biophys_compartmental_solver",
+ "biophys_core",
+ "biophys_event_queue_l4",
+ "biophys_morphology",
+ "biophys_synapses_l4",
+ "blake3",
  "dbm_core",
  "microcircuit_core",
  "microcircuit_pag_stub",
