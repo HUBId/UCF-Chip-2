@@ -98,11 +98,17 @@ pub fn homeostasis_tick(
     let target = config.target_rate_q as u32;
     let mut updated = false;
     if state.spike_count_window > target {
-        let next = state.scale_q.saturating_sub(config.gain_down_q).max(min_scale);
+        let next = state
+            .scale_q
+            .saturating_sub(config.gain_down_q)
+            .max(min_scale);
         updated = next != state.scale_q;
         state.scale_q = next;
     } else if state.spike_count_window < target {
-        let next = state.scale_q.saturating_add(config.gain_up_q).min(max_scale);
+        let next = state
+            .scale_q
+            .saturating_add(config.gain_up_q)
+            .min(max_scale);
         updated = next != state.scale_q;
         state.scale_q = next;
     }

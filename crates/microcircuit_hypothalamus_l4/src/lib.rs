@@ -441,11 +441,7 @@ impl HypothalamusL4Microcircuit {
         }
     }
 
-    fn scaled_g_max_fixed(
-        synapse: &SynapseL4,
-        mods: ModulatorField,
-        scale_q: u16,
-    ) -> u32 {
+    fn scaled_g_max_fixed(synapse: &SynapseL4, mods: ModulatorField, scale_q: u16) -> u32 {
         let g_max_eff = synapse.effective_g_max_fixed(mods);
         if synapse.kind == SynKind::AMPA {
             scale_g_max_fixed(g_max_eff, scale_q, max_synapse_g_fixed())
