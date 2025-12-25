@@ -639,6 +639,10 @@ dependencies = [
 name = "microcircuit_hypothalamus_l4"
 version = "0.1.0"
 dependencies = [
+ "asset_chunker",
+ "asset_rehydration",
+ "biophys_asset_builder",
+ "biophys_assets",
  "biophys_channels",
  "biophys_compartmental_solver",
  "biophys_core",
@@ -654,6 +658,8 @@ dependencies = [
  "microcircuit_hypothalamus_setpoint",
  "microcircuit_pag_stub",
  "microcircuit_pmrf_stub",
+ "prost",
+ "ucf-protocol",
 ]
 
 [[package]]

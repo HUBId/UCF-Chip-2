@@ -8,7 +8,18 @@ path = "src/lib.rs"
 
 [features]
 microcircuit-hypothalamus-setpoint = []
-biophys-l4-hypothalamus = []
+biophys = []
+biophys-l4 = ["biophys"]
+biophys-l4-synapses = ["biophys-l4"]
+biophys-l4-hypothalamus = [
+    "dep:microcircuit_hypothalamus_l4",
+    "microcircuit_hypothalamus_l4/biophys-l4-hypothalamus",
+    "biophys-l4-synapses",
+]
+biophys-l4-hypothalamus-assets = [
+    "biophys-l4-hypothalamus",
+    "microcircuit_hypothalamus_l4/biophys-l4-hypothalamus-assets",
+]
 
 [dependencies]
 dbm_core = { path = "../dbm_core" }

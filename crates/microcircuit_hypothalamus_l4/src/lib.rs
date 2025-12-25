@@ -21,6 +21,16 @@ use microcircuit_core::{CircuitConfig, MicrocircuitBackend};
 use microcircuit_hypothalamus_setpoint::{HypoInput, HypoOutput};
 use microcircuit_pag_stub::DefensePattern;
 use microcircuit_pmrf_stub::SequenceMode;
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+use {
+    asset_rehydration::{
+        decode_channel_params, decode_connectivity, decode_morphology, decode_synapse_params,
+        AssetRehydrator,
+    },
+    biophys_asset_builder::{CircuitBuilderFromAssets, Error as AssetBuildError},
+    biophys_assets::{ChannelParamsSet, ConnectivityGraph, MorphologySet, SynapseParamsSet},
+    ucf::v1::{AssetBundle, AssetKind},
+};
 
 const POOL_COUNT: usize = 7;
 const POOL_SIZE: usize = 2;
@@ -68,6 +78,12 @@ const ACCUMULATOR_GAIN: i32 = 20;
 const HYSTERESIS_TICKS: u8 = 3;
 const STABLE_COUNTER_TARGET: u8 = 2;
 const RECOVERY_GUARD_TICKS: u8 = 3;
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+const ASSET_POOL_CONVENTION_VERSION: u32 = 1;
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+const MAX_ASSET_EDGES: usize = 10_000;
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+const LEAK_G_SCALE: f32 = 0.1;
 
 #[derive(Debug, Clone)]
 struct L4Neuron {
@@ -127,6 +143,10 @@ pub struct HypothalamusL4Microcircuit {
     in_replay_mode: bool,
     homeostasis_config: HomeostasisConfig,
     homeostasis_state: HomeostasisState,
+    #[cfg(feature = "biophys-l4-hypothalamus-assets")]
+    asset_manifest_digest: Option<[u8; 32]>,
+    #[cfg(feature = "biophys-l4-hypothalamus-assets")]
+    asset_pool_mapping_version: u32,
 }
 
 impl HypothalamusL4Microcircuit {
@@ -135,6 +155,72 @@ impl HypothalamusL4Microcircuit {
             .map(|idx| build_neuron(idx as u32))
             .collect::<Vec<_>>();
         let synapses = build_synapses();
+        Self::build_from_parts(config, neurons, synapses, None, 0)
+    }
+
+    #[cfg(feature = "biophys-l4-hypothalamus-assets")]
+    pub fn new_from_asset_bundle(
+        bundle: &AssetBundle,
+        rehydrator: &AssetRehydrator,
+    ) -> Result<Self, AssetBuildError> {
+        rehydrator.verify_bundle(bundle)?;
+        let manifest = bundle
+            .manifest
+            .as_ref()
+            .ok_or(AssetBuildError::MissingManifest)?;
+        let manifest_digest = digest_from_vec(&manifest.manifest_digest, "manifest_digest")?;
+        let morph_digest = manifest_digest_for_kind(manifest, AssetKind::Morphology)?;
+        let chan_digest = manifest_digest_for_kind(manifest, AssetKind::ChannelParams)?;
+        let syn_digest = manifest_digest_for_kind(manifest, AssetKind::SynapseParams)?;
+        let conn_digest = manifest_digest_for_kind(manifest, AssetKind::Connectivity)?;
+
+        let morph_bytes = rehydrator.reassemble(bundle, AssetKind::Morphology, morph_digest)?;
+        let chan_bytes = rehydrator.reassemble(bundle, AssetKind::ChannelParams, chan_digest)?;
+        let syn_bytes = rehydrator.reassemble(bundle, AssetKind::SynapseParams, syn_digest)?;
+        let conn_bytes = rehydrator.reassemble(bundle, AssetKind::Connectivity, conn_digest)?;
+
+        let morph = decode_morphology(&morph_bytes)?;
+        let chan = decode_channel_params(&chan_bytes)?;
+        let syn = decode_synapse_params(&syn_bytes)?;
+        let conn = decode_connectivity(&conn_bytes)?;
+
+        verify_asset_digest("morphology", morph.digest(), morph_digest)?;
+        verify_asset_digest("channel_params", chan.digest(), chan_digest)?;
+        verify_asset_digest("synapse_params", syn.digest(), syn_digest)?;
+        verify_asset_digest("connectivity", conn.digest(), conn_digest)?;
+
+        if conn.edges.len() > MAX_ASSET_EDGES {
+            return Err(AssetBuildError::BoundsExceeded {
+                label: "edges",
+                count: conn.edges.len(),
+                max: MAX_ASSET_EDGES,
+            });
+        }
+        if morph.neurons.len() != NEURON_COUNT {
+            return Err(AssetBuildError::InvalidAssetData {
+                message: format!(
+                    "expected {NEURON_COUNT} neurons, got {}",
+                    morph.neurons.len()
+                ),
+            });
+        }
+        validate_asset_convention_v1(&morph)?;
+
+        let mut circuit = Self::build_from_assets(&morph, &chan, &syn, &conn)?;
+        circuit.asset_manifest_digest = Some(manifest_digest);
+        circuit.asset_pool_mapping_version = ASSET_POOL_CONVENTION_VERSION;
+        Ok(circuit)
+    }
+
+    fn build_from_parts(
+        config: CircuitConfig,
+        neurons: Vec<L4Neuron>,
+        synapses: Vec<SynapseL4>,
+        asset_manifest_digest: Option<[u8; 32]>,
+        asset_pool_mapping_version: u32,
+    ) -> Self {
+        #[cfg(not(feature = "biophys-l4-hypothalamus-assets"))]
+        let _ = (asset_manifest_digest, asset_pool_mapping_version);
         let syn_states = vec![SynapseState::default(); synapses.len()];
         let current_modulators = ModulatorField::default();
         let mut homeostasis_config = HomeostasisConfig::default();
@@ -190,6 +276,10 @@ impl HypothalamusL4Microcircuit {
             in_replay_mode: false,
             homeostasis_config,
             homeostasis_state,
+            #[cfg(feature = "biophys-l4-hypothalamus-assets")]
+            asset_manifest_digest,
+            #[cfg(feature = "biophys-l4-hypothalamus-assets")]
+            asset_pool_mapping_version,
         }
     }
 
@@ -905,6 +995,12 @@ impl MicrocircuitBackend<HypoInput, HypoOutput> for HypothalamusL4Microcircuit {
         update_f32(&mut hasher, DT_MS);
         update_u32(&mut hasher, SUBSTEPS as u32);
         update_u32(&mut hasher, NEURON_COUNT as u32);
+        #[cfg(feature = "biophys-l4-hypothalamus-assets")]
+        {
+            let digest = self.asset_manifest_digest.unwrap_or([0u8; 32]);
+            hasher.update(&digest);
+            update_u32(&mut hasher, self.asset_pool_mapping_version);
+        }
         for neuron in &self.neurons {
             hasher.update(&neuron.solver.config_digest());
         }
@@ -1224,6 +1320,371 @@ fn stp_mode_code(mode: StpMode) -> u32 {
     }
 }
 
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+impl CircuitBuilderFromAssets for HypothalamusL4Microcircuit {
+    fn build_from_assets(
+        morph: &MorphologySet,
+        chan: &ChannelParamsSet,
+        syn: &SynapseParamsSet,
+        conn: &ConnectivityGraph,
+    ) -> Result<Self, AssetBuildError> {
+        let mut morph_neurons = morph.neurons.clone();
+        morph_neurons.sort_by_key(|neuron| neuron.neuron_id);
+
+        let mut seen = vec![false; NEURON_COUNT];
+        for neuron in &morph_neurons {
+            let idx = neuron.neuron_id as usize;
+            if idx >= NEURON_COUNT {
+                return Err(AssetBuildError::UnknownNeuron {
+                    neuron_id: neuron.neuron_id,
+                });
+            }
+            if seen[idx] {
+                return Err(AssetBuildError::InvalidAssetData {
+                    message: format!("duplicate neuron id {}", neuron.neuron_id),
+                });
+            }
+            seen[idx] = true;
+        }
+
+        let mut channel_map = std::collections::BTreeMap::new();
+        for params in &chan.per_compartment {
+            channel_map.insert((params.neuron_id, params.comp_id), params);
+        }
+
+        let mut morphologies = Vec::with_capacity(morph_neurons.len());
+        for neuron in &morph_neurons {
+            let mut compartments = neuron.compartments.clone();
+            compartments.sort_by_key(|comp| comp.comp_id);
+            let depths = compute_compartment_depths(&compartments)?;
+            let morph_comps = compartments
+                .iter()
+                .map(|comp| {
+                    let kind = match comp.kind {
+                        biophys_assets::CompartmentKind::Soma => CompartmentKind::Soma,
+                        biophys_assets::CompartmentKind::Dendrite => CompartmentKind::Dendrite,
+                        biophys_assets::CompartmentKind::Axon => CompartmentKind::Axon,
+                    };
+                    Compartment {
+                        id: CompartmentId(comp.comp_id),
+                        parent: comp.parent.map(CompartmentId),
+                        kind,
+                        depth: *depths.get(&comp.comp_id).unwrap_or(&0),
+                        capacitance: asset_compartment_capacitance(comp.kind),
+                        axial_resistance: asset_compartment_axial_resistance(comp.kind),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let morphology = NeuronMorphology {
+                neuron_id: NeuronId(neuron.neuron_id),
+                compartments: morph_comps,
+            };
+            morphology
+                .validate(biophys_morphology::MAX_COMPARTMENTS)
+                .map_err(|error| AssetBuildError::InvalidAssetData {
+                    message: format!("morphology validation failed: {error:?}"),
+                })?;
+            morphologies.push(morphology);
+        }
+
+        let mut neurons = Vec::with_capacity(morphologies.len());
+        for morphology in &morphologies {
+            let channels = morphology
+                .compartments
+                .iter()
+                .map(|comp| {
+                    let params = channel_map
+                        .get(&(morphology.neuron_id.0, comp.id.0))
+                        .ok_or(AssetBuildError::MissingChannelParams {
+                            neuron_id: morphology.neuron_id.0,
+                            comp_id: comp.id.0,
+                        })?;
+                    let leak = Leak {
+                        g: params.leak_g as f32 * LEAK_G_SCALE,
+                        e_rev: -65.0,
+                    };
+                    let nak = if params.na_g == 0 && params.k_g == 0 {
+                        None
+                    } else {
+                        Some(NaK {
+                            g_na: params.na_g as f32,
+                            g_k: params.k_g as f32,
+                            e_na: 50.0,
+                            e_k: -77.0,
+                        })
+                    };
+                    Ok(CompartmentChannels { leak, nak })
+                })
+                .collect::<Result<Vec<_>, AssetBuildError>>()?;
+
+            let solver = L4Solver::new(morphology.clone(), channels, DT_MS, CLAMP_MIN, CLAMP_MAX)
+                .map_err(|error| AssetBuildError::InvalidAssetData {
+                message: format!("solver init failed: {error:?}"),
+            })?;
+            let state = L4State::new(-65.0, morphology.compartments.len());
+            let last_soma_v = state.voltages[0];
+            neurons.push(L4Neuron {
+                solver,
+                state,
+                last_soma_v,
+            });
+        }
+
+        let mut edges = conn.edges.clone();
+        edges.sort_by_key(|edge| {
+            (
+                edge.pre,
+                edge.post,
+                edge.syn_type as u8,
+                edge.delay_steps,
+                edge.syn_param_id,
+            )
+        });
+
+        let policy = default_targeting_policy();
+        let mut synapses = Vec::with_capacity(edges.len());
+        for edge in edges {
+            let pre = edge.pre as usize;
+            let post = edge.post as usize;
+            if pre >= morphologies.len() {
+                return Err(AssetBuildError::UnknownNeuron {
+                    neuron_id: edge.pre,
+                });
+            }
+            if post >= morphologies.len() {
+                return Err(AssetBuildError::UnknownNeuron {
+                    neuron_id: edge.post,
+                });
+            }
+            let syn_params = syn.params.get(edge.syn_param_id as usize).ok_or(
+                AssetBuildError::MissingSynapseParams {
+                    syn_param_id: edge.syn_param_id,
+                },
+            )?;
+            if syn_params.syn_type != edge.syn_type {
+                return Err(AssetBuildError::InvalidAssetData {
+                    message: format!("synapse type mismatch for edge {}->{}", edge.pre, edge.post),
+                });
+            }
+            let kind = match edge.syn_type {
+                biophys_assets::SynType::Exc => SynKind::AMPA,
+                biophys_assets::SynType::Inh => SynKind::GABA,
+            };
+            let mod_channel = map_asset_mod_channel(syn_params.mod_channel, syn_params.syn_type);
+            let g_max_base_q = f32_to_fixed_u32(syn_params.weight_base.abs() as f32);
+            let (e_rev, tau_rise_ms, tau_decay_ms, stdp_enabled) = match kind {
+                SynKind::AMPA => (AMPA_E_REV, AMPA_TAU_RISE_MS, AMPA_TAU_DECAY_MS, true),
+                SynKind::GABA => (GABA_E_REV, GABA_TAU_RISE_MS, GABA_TAU_DECAY_MS, false),
+                SynKind::NMDA => (AMPA_E_REV, AMPA_TAU_RISE_MS, AMPA_TAU_DECAY_MS, true),
+            };
+            let (stp_params, stp_state) = if syn_params.stp_u == 0 {
+                disabled_stp()
+            } else {
+                let params = StpParamsL4 {
+                    mode: biophys_synapses_l4::StpMode::STP_TM,
+                    u_base_q: syn_params.stp_u.min(STP_SCALE),
+                    tau_rec_steps: syn_params.tau_rec.max(1),
+                    tau_fac_steps: syn_params.tau_fac.max(1),
+                };
+                let state = StpStateL4::new(params);
+                (params, state)
+            };
+            let edge_key = EdgeKey {
+                pre_neuron_id: NeuronId(edge.pre),
+                post_neuron_id: NeuronId(edge.post),
+                synapse_index: synapses.len() as u32,
+            };
+            let post_compartment =
+                select_post_compartment(&morphologies[post], kind, &policy, edge_key).0;
+            synapses.push(SynapseL4 {
+                pre_neuron: edge.pre,
+                post_neuron: edge.post,
+                post_compartment,
+                kind,
+                mod_channel,
+                g_max_base_q,
+                g_nmda_base_q: 0,
+                g_max_min_q: 0,
+                g_max_max_q: max_synapse_g_fixed(),
+                e_rev,
+                tau_rise_ms,
+                tau_decay_ms,
+                tau_decay_nmda_steps: 100,
+                nmda_vdep_mode: NmdaVDepMode::PiecewiseLinear,
+                delay_steps: edge.delay_steps,
+                stp_params,
+                stp_state,
+                stdp_enabled,
+                stdp_trace: StdpTrace::default(),
+            });
+        }
+
+        Ok(HypothalamusL4Microcircuit::build_from_parts(
+            CircuitConfig::default(),
+            neurons,
+            synapses,
+            None,
+            ASSET_POOL_CONVENTION_VERSION,
+        ))
+    }
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn validate_asset_convention_v1(morph: &MorphologySet) -> Result<(), AssetBuildError> {
+    let mut seen = vec![false; NEURON_COUNT];
+    for neuron in &morph.neurons {
+        let idx = neuron.neuron_id as usize;
+        if idx >= NEURON_COUNT {
+            return Err(AssetBuildError::UnknownNeuron {
+                neuron_id: neuron.neuron_id,
+            });
+        }
+        if seen[idx] {
+            return Err(AssetBuildError::InvalidAssetData {
+                message: format!("duplicate neuron id {}", neuron.neuron_id),
+            });
+        }
+        seen[idx] = true;
+    }
+    if let Some((idx, _)) = seen.iter().enumerate().find(|(_, value)| !**value) {
+        return Err(AssetBuildError::InvalidAssetData {
+            message: format!("missing neuron id {idx} for pool convention v1"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn asset_compartment_capacitance(kind: biophys_assets::CompartmentKind) -> f32 {
+    match kind {
+        biophys_assets::CompartmentKind::Soma => 1.0,
+        biophys_assets::CompartmentKind::Dendrite => 1.2,
+        biophys_assets::CompartmentKind::Axon => 1.0,
+    }
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn asset_compartment_axial_resistance(kind: biophys_assets::CompartmentKind) -> f32 {
+    match kind {
+        biophys_assets::CompartmentKind::Soma => 150.0,
+        biophys_assets::CompartmentKind::Dendrite => 200.0,
+        biophys_assets::CompartmentKind::Axon => 150.0,
+    }
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn compute_compartment_depths(
+    compartments: &[biophys_assets::Compartment],
+) -> Result<std::collections::BTreeMap<u32, u32>, AssetBuildError> {
+    let mut parent_map = std::collections::BTreeMap::new();
+    for comp in compartments {
+        parent_map.insert(comp.comp_id, comp.parent);
+    }
+    let mut depths = std::collections::BTreeMap::new();
+    let mut visiting = std::collections::BTreeSet::new();
+    for comp in compartments {
+        compute_depth_for_comp(comp.comp_id, &parent_map, &mut depths, &mut visiting)?;
+    }
+    Ok(depths)
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn compute_depth_for_comp(
+    comp_id: u32,
+    parent_map: &std::collections::BTreeMap<u32, Option<u32>>,
+    depths: &mut std::collections::BTreeMap<u32, u32>,
+    visiting: &mut std::collections::BTreeSet<u32>,
+) -> Result<u32, AssetBuildError> {
+    if let Some(depth) = depths.get(&comp_id) {
+        return Ok(*depth);
+    }
+    if !visiting.insert(comp_id) {
+        return Err(AssetBuildError::InvalidAssetData {
+            message: format!("cycle detected at compartment {comp_id}"),
+        });
+    }
+    let depth = match parent_map.get(&comp_id).copied().flatten() {
+        None => 0,
+        Some(parent) => {
+            if !parent_map.contains_key(&parent) {
+                return Err(AssetBuildError::InvalidAssetData {
+                    message: format!("missing parent compartment {parent} for {comp_id}"),
+                });
+            }
+            compute_depth_for_comp(parent, parent_map, depths, visiting)?.saturating_add(1)
+        }
+    };
+    visiting.remove(&comp_id);
+    depths.insert(comp_id, depth);
+    Ok(depth)
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn digest_from_vec(bytes: &[u8], label: &'static str) -> Result<[u8; 32], AssetBuildError> {
+    if bytes.len() != 32 {
+        return Err(AssetBuildError::InvalidDigestLength {
+            label,
+            len: bytes.len(),
+        });
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(bytes);
+    Ok(out)
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn manifest_digest_for_kind(
+    manifest: &ucf::v1::AssetManifest,
+    kind: AssetKind,
+) -> Result<[u8; 32], AssetBuildError> {
+    let component = manifest
+        .components
+        .iter()
+        .find(|component| component.kind == kind as i32)
+        .ok_or(AssetBuildError::MissingAssetDigest {
+            kind: kind_name(kind),
+        })?;
+    digest_from_vec(&component.digest, "asset_digest")
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn kind_name(kind: AssetKind) -> &'static str {
+    match kind {
+        AssetKind::Morphology => "morphology",
+        AssetKind::ChannelParams => "channel_params",
+        AssetKind::SynapseParams => "synapse_params",
+        AssetKind::Connectivity => "connectivity",
+        AssetKind::Unknown => "unknown",
+    }
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn verify_asset_digest(
+    kind: &'static str,
+    computed: [u8; 32],
+    expected: [u8; 32],
+) -> Result<(), AssetBuildError> {
+    if computed != expected {
+        return Err(AssetBuildError::AssetDigestMismatch { kind });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "biophys-l4-hypothalamus-assets")]
+fn map_asset_mod_channel(
+    mod_channel: biophys_assets::ModChannel,
+    syn_type: biophys_assets::SynType,
+) -> ModChannel {
+    match mod_channel {
+        biophys_assets::ModChannel::None => ModChannel::None,
+        biophys_assets::ModChannel::A => ModChannel::NaDa,
+        biophys_assets::ModChannel::B => match syn_type {
+            biophys_assets::SynType::Exc => ModChannel::Na,
+            biophys_assets::SynType::Inh => ModChannel::Ht,
+        },
+    }
+}
+
 #[cfg(all(
     test,
     feature = "biophys",
@@ -1450,5 +1911,509 @@ mod tests {
 
         let output = circuit.step(&input, 0);
         assert!(output.overlays.simulate_first);
+    }
+}
+
+#[cfg(all(
+    test,
+    feature = "biophys",
+    feature = "biophys-l4",
+    feature = "biophys-l4-synapses",
+    feature = "biophys-l4-hypothalamus",
+    feature = "biophys-l4-hypothalamus-assets"
+))]
+mod asset_tests {
+    use super::{AssetBuildError, *};
+    use asset_chunker::{
+        build_asset_bundle_with_policy, chunk_asset, BundleIdPolicy, ChunkerConfig,
+    };
+    use asset_rehydration::ASSET_MANIFEST_DOMAIN;
+    use biophys_assets::{
+        to_asset_digest, ChannelParams, ChannelParamsSet, Compartment as AssetCompartment,
+        CompartmentKind as AssetCompartmentKind, ConnEdge, ConnectivityGraph, ModChannel,
+        MorphNeuron, MorphologySet, SynType, SynapseParams, SynapseParamsSet,
+    };
+    use prost::Message;
+    use ucf::v1::{AssetBundle, AssetKind, AssetManifest, Compression};
+
+    fn profile_rank(profile: ProfileState) -> u8 {
+        match profile {
+            ProfileState::M0 => 0,
+            ProfileState::M1 => 1,
+            ProfileState::M2 => 2,
+            ProfileState::M3 => 3,
+        }
+    }
+
+    fn hypo_morphology_assets(neuron_count: usize) -> MorphologySet {
+        let neurons = (0..neuron_count as u32)
+            .map(|neuron_id| {
+                let compartments = vec![
+                    AssetCompartment {
+                        comp_id: 0,
+                        parent: None,
+                        kind: AssetCompartmentKind::Soma,
+                        length_um: 10,
+                        diameter_um: 8,
+                    },
+                    AssetCompartment {
+                        comp_id: 1,
+                        parent: Some(0),
+                        kind: AssetCompartmentKind::Dendrite,
+                        length_um: 20,
+                        diameter_um: 4,
+                    },
+                    AssetCompartment {
+                        comp_id: 2,
+                        parent: Some(0),
+                        kind: AssetCompartmentKind::Dendrite,
+                        length_um: 20,
+                        diameter_um: 4,
+                    },
+                ];
+                MorphNeuron {
+                    neuron_id,
+                    compartments,
+                }
+            })
+            .collect();
+        MorphologySet {
+            version: 1,
+            neurons,
+        }
+    }
+
+    fn hypo_channel_params_assets(morph: &MorphologySet) -> ChannelParamsSet {
+        let mut per_compartment = Vec::new();
+        for neuron in &morph.neurons {
+            for comp in &neuron.compartments {
+                let (na_g, k_g) = if comp.kind == AssetCompartmentKind::Soma {
+                    (120, 36)
+                } else {
+                    (0, 0)
+                };
+                per_compartment.push(ChannelParams {
+                    neuron_id: neuron.neuron_id,
+                    comp_id: comp.comp_id,
+                    leak_g: 1,
+                    na_g,
+                    k_g,
+                });
+            }
+        }
+        ChannelParamsSet {
+            version: 1,
+            per_compartment,
+        }
+    }
+
+    fn hypo_synapse_params_assets() -> SynapseParamsSet {
+        let p1_weight = (AMPA_G_MAX_BASE * 1.1).round() as i32;
+        let p2_weight = (AMPA_G_MAX_DOMINANT * 0.9).round() as i32;
+        SynapseParamsSet {
+            version: 1,
+            params: vec![
+                SynapseParams {
+                    syn_type: SynType::Exc,
+                    weight_base: AMPA_G_MAX_BASE as i32,
+                    stp_u: 0,
+                    tau_rec: 1,
+                    tau_fac: 1,
+                    mod_channel: ModChannel::B,
+                },
+                SynapseParams {
+                    syn_type: SynType::Exc,
+                    weight_base: p1_weight,
+                    stp_u: 0,
+                    tau_rec: 1,
+                    tau_fac: 1,
+                    mod_channel: ModChannel::B,
+                },
+                SynapseParams {
+                    syn_type: SynType::Exc,
+                    weight_base: p2_weight,
+                    stp_u: 0,
+                    tau_rec: 1,
+                    tau_fac: 1,
+                    mod_channel: ModChannel::B,
+                },
+                SynapseParams {
+                    syn_type: SynType::Exc,
+                    weight_base: AMPA_G_MAX_DOMINANT as i32,
+                    stp_u: 0,
+                    tau_rec: 1,
+                    tau_fac: 1,
+                    mod_channel: ModChannel::B,
+                },
+                SynapseParams {
+                    syn_type: SynType::Inh,
+                    weight_base: GABA_G_MAX as i32,
+                    stp_u: 0,
+                    tau_rec: 1,
+                    tau_fac: 1,
+                    mod_channel: ModChannel::B,
+                },
+            ],
+        }
+    }
+
+    fn hypo_connectivity_assets() -> ConnectivityGraph {
+        let mut edges = Vec::new();
+        for pool in 0..POOL_COUNT {
+            let (start, end) = HypothalamusL4Microcircuit::pool_bounds(pool);
+            for pre in start..end {
+                for post in start..end {
+                    if pre == post {
+                        continue;
+                    }
+                    edges.push(ConnEdge {
+                        pre: pre as u32,
+                        post: post as u32,
+                        syn_type: SynType::Exc,
+                        delay_steps: 1,
+                        syn_param_id: 0,
+                    });
+                }
+            }
+        }
+
+        for pre in 0..EXCITATORY_COUNT {
+            let pool = pre / POOL_SIZE;
+            let syn_param_id = match pool {
+                IDX_P1 => 1,
+                IDX_P2 => 2,
+                IDX_P3 => 3,
+                _ => 0,
+            };
+            for inh in 0..INHIBITORY_COUNT {
+                let post = EXCITATORY_COUNT + inh;
+                edges.push(ConnEdge {
+                    pre: pre as u32,
+                    post: post as u32,
+                    syn_type: SynType::Exc,
+                    delay_steps: 1,
+                    syn_param_id,
+                });
+            }
+        }
+
+        for inh in 0..INHIBITORY_COUNT {
+            let pre = EXCITATORY_COUNT + inh;
+            for post in 0..EXCITATORY_COUNT {
+                edges.push(ConnEdge {
+                    pre: pre as u32,
+                    post: post as u32,
+                    syn_type: SynType::Inh,
+                    delay_steps: 1,
+                    syn_param_id: 4,
+                });
+            }
+        }
+
+        ConnectivityGraph { version: 1, edges }
+    }
+
+    fn compute_manifest_digest(manifest: &AssetManifest) -> [u8; 32] {
+        let mut normalized = manifest.clone();
+        normalized.manifest_digest = vec![0u8; 32];
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(ASSET_MANIFEST_DOMAIN.as_bytes());
+        hasher.update(&normalized.encode_to_vec());
+        *hasher.finalize().as_bytes()
+    }
+
+    fn build_asset_bundle(
+        morph: &MorphologySet,
+        chan: &ChannelParamsSet,
+        syn: &SynapseParamsSet,
+        conn: &ConnectivityGraph,
+        conn_digest_override: Option<[u8; 32]>,
+        conn_bytes_override: Option<Vec<u8>>,
+    ) -> AssetBundle {
+        let created_at_ms = 10;
+        let conn_digest = conn_digest_override.unwrap_or_else(|| conn.digest());
+        let mut manifest = AssetManifest {
+            manifest_version: 1,
+            created_at_ms,
+            manifest_digest: vec![0u8; 32],
+            components: vec![
+                to_asset_digest(
+                    AssetKind::Morphology,
+                    morph.version,
+                    morph.digest(),
+                    created_at_ms,
+                    None,
+                ),
+                to_asset_digest(
+                    AssetKind::ChannelParams,
+                    chan.version,
+                    chan.digest(),
+                    created_at_ms,
+                    None,
+                ),
+                to_asset_digest(
+                    AssetKind::SynapseParams,
+                    syn.version,
+                    syn.digest(),
+                    created_at_ms,
+                    None,
+                ),
+                to_asset_digest(
+                    AssetKind::Connectivity,
+                    conn.version,
+                    conn_digest,
+                    created_at_ms,
+                    None,
+                ),
+            ],
+        };
+        let manifest_digest = compute_manifest_digest(&manifest);
+        manifest.manifest_digest = manifest_digest.to_vec();
+
+        let chunker = ChunkerConfig {
+            max_chunk_bytes: 128,
+            compression: Compression::None,
+            max_chunks_total: 2048,
+            bundle_id_policy: BundleIdPolicy::ManifestDigestPrefix { prefix_len: 8 },
+        };
+        let mut chunks = Vec::new();
+        chunks.extend(
+            chunk_asset(
+                AssetKind::Morphology,
+                morph.version,
+                morph.digest(),
+                &morph.to_canonical_bytes(),
+                &chunker,
+                created_at_ms,
+            )
+            .expect("morph chunks"),
+        );
+        chunks.extend(
+            chunk_asset(
+                AssetKind::ChannelParams,
+                chan.version,
+                chan.digest(),
+                &chan.to_canonical_bytes(),
+                &chunker,
+                created_at_ms,
+            )
+            .expect("channel chunks"),
+        );
+        chunks.extend(
+            chunk_asset(
+                AssetKind::SynapseParams,
+                syn.version,
+                syn.digest(),
+                &syn.to_canonical_bytes(),
+                &chunker,
+                created_at_ms,
+            )
+            .expect("syn chunks"),
+        );
+        let conn_bytes = conn_bytes_override.unwrap_or_else(|| conn.to_canonical_bytes());
+        chunks.extend(
+            chunk_asset(
+                AssetKind::Connectivity,
+                conn.version,
+                conn_digest,
+                &conn_bytes,
+                &chunker,
+                created_at_ms,
+            )
+            .expect("conn chunks"),
+        );
+        chunks.sort_by(|a, b| {
+            a.asset_digest
+                .cmp(&b.asset_digest)
+                .then_with(|| a.chunk_index.cmp(&b.chunk_index))
+        });
+
+        build_asset_bundle_with_policy(
+            manifest,
+            chunks,
+            created_at_ms,
+            BundleIdPolicy::ManifestDigestPrefix { prefix_len: 8 },
+        )
+    }
+
+    fn demo_inputs() -> Vec<HypoInput> {
+        vec![
+            HypoInput::default(),
+            HypoInput {
+                isv: dbm_core::IsvSnapshot {
+                    policy_pressure: LevelClass::High,
+                    ..dbm_core::IsvSnapshot::default()
+                },
+                ..HypoInput::default()
+            },
+            HypoInput {
+                isv: dbm_core::IsvSnapshot {
+                    threat: LevelClass::High,
+                    ..dbm_core::IsvSnapshot::default()
+                },
+                ..HypoInput::default()
+            },
+            HypoInput {
+                isv: dbm_core::IsvSnapshot {
+                    integrity: IntegrityState::Fail,
+                    ..dbm_core::IsvSnapshot::default()
+                },
+                ..HypoInput::default()
+            },
+        ]
+    }
+
+    #[test]
+    fn asset_build_is_deterministic() {
+        let morph = hypo_morphology_assets(NEURON_COUNT);
+        let chan = hypo_channel_params_assets(&morph);
+        let syn = hypo_synapse_params_assets();
+        let conn = hypo_connectivity_assets();
+        let bundle = build_asset_bundle(&morph, &chan, &syn, &conn, None, None);
+        let rehydrator = AssetRehydrator::new();
+        let inputs = demo_inputs();
+
+        let mut a =
+            HypothalamusL4Microcircuit::new_from_asset_bundle(&bundle, &rehydrator).expect("asset");
+        let mut b =
+            HypothalamusL4Microcircuit::new_from_asset_bundle(&bundle, &rehydrator).expect("asset");
+
+        let outputs_a = inputs
+            .iter()
+            .map(|input| {
+                let output = a.step(input, 0);
+                (
+                    output.profile_state,
+                    output.overlays.clone(),
+                    a.config_digest(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let outputs_b = inputs
+            .iter()
+            .map(|input| {
+                let output = b.step(input, 0);
+                (
+                    output.profile_state,
+                    output.overlays.clone(),
+                    b.config_digest(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(outputs_a, outputs_b);
+    }
+
+    #[test]
+    fn asset_backed_obeys_demo_outputs() {
+        let morph = hypo_morphology_assets(NEURON_COUNT);
+        let chan = hypo_channel_params_assets(&morph);
+        let syn = hypo_synapse_params_assets();
+        let conn = hypo_connectivity_assets();
+        let bundle = build_asset_bundle(&morph, &chan, &syn, &conn, None, None);
+        let rehydrator = AssetRehydrator::new();
+        let inputs = demo_inputs();
+
+        let expected_floor = [
+            ProfileState::M0,
+            ProfileState::M1,
+            ProfileState::M2,
+            ProfileState::M3,
+        ];
+
+        for (idx, (input, expected_profile)) in inputs.iter().zip(expected_floor.iter()).enumerate()
+        {
+            let mut hardcoded = HypothalamusL4Microcircuit::new(CircuitConfig::default());
+            let mut asset_backed =
+                HypothalamusL4Microcircuit::new_from_asset_bundle(&bundle, &rehydrator)
+                    .expect("asset");
+            let hardcoded_output = (0..20)
+                .map(|_| hardcoded.step(input, 0))
+                .last()
+                .expect("hardcoded output");
+            let asset_output = (0..20)
+                .map(|_| asset_backed.step(input, 0))
+                .last()
+                .expect("asset output");
+            let floor = HypothalamusL4Microcircuit::rules_floor(input);
+            assert_eq!(floor, *expected_profile, "rules floor mismatch at {idx}");
+            assert_eq!(
+                hardcoded_output.profile_state, asset_output.profile_state,
+                "asset/hardcoded divergence at {idx}"
+            );
+            assert!(
+                profile_rank(hardcoded_output.profile_state) >= profile_rank(*expected_profile),
+                "hardcoded below floor at {idx}"
+            );
+            assert!(
+                profile_rank(asset_output.profile_state) >= profile_rank(*expected_profile),
+                "asset below floor at {idx}"
+            );
+        }
+    }
+
+    #[test]
+    fn reject_wrong_neuron_count() {
+        let morph = hypo_morphology_assets(NEURON_COUNT - 1);
+        let chan = hypo_channel_params_assets(&morph);
+        let syn = hypo_synapse_params_assets();
+        let conn = hypo_connectivity_assets();
+        let bundle = build_asset_bundle(&morph, &chan, &syn, &conn, None, None);
+        let rehydrator = AssetRehydrator::new();
+
+        let err = HypothalamusL4Microcircuit::new_from_asset_bundle(&bundle, &rehydrator)
+            .expect_err("expected neuron count mismatch");
+        assert!(matches!(err, AssetBuildError::InvalidAssetData { .. }));
+    }
+
+    #[test]
+    fn manifest_digest_binding_rejects_mismatch() {
+        let morph = hypo_morphology_assets(NEURON_COUNT);
+        let chan = hypo_channel_params_assets(&morph);
+        let syn = hypo_synapse_params_assets();
+        let conn = hypo_connectivity_assets();
+        let mut mutated = conn.to_canonical_bytes();
+        mutated[0] ^= 0xFF;
+        let bundle = build_asset_bundle(
+            &morph,
+            &chan,
+            &syn,
+            &conn,
+            Some(conn.digest()),
+            Some(mutated),
+        );
+        let rehydrator = AssetRehydrator::new();
+
+        let err = HypothalamusL4Microcircuit::new_from_asset_bundle(&bundle, &rehydrator)
+            .expect_err("expected digest mismatch");
+        match err {
+            AssetBuildError::AssetDigestMismatch { .. } => {}
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn boundedness_rejects_large_connectivity() {
+        let morph = hypo_morphology_assets(NEURON_COUNT);
+        let chan = hypo_channel_params_assets(&morph);
+        let syn = hypo_synapse_params_assets();
+        let conn = ConnectivityGraph {
+            version: 1,
+            edges: (0..(MAX_ASSET_EDGES as u32 + 1))
+                .map(|idx| ConnEdge {
+                    pre: 0,
+                    post: 0,
+                    syn_type: SynType::Exc,
+                    delay_steps: 1,
+                    syn_param_id: idx % syn.params.len() as u32,
+                })
+                .collect(),
+        };
+        let bundle = build_asset_bundle(&morph, &chan, &syn, &conn, None, None);
+        let rehydrator = AssetRehydrator::new();
+
+        let err = HypothalamusL4Microcircuit::new_from_asset_bundle(&bundle, &rehydrator)
+            .expect_err("expected bounds error");
+        assert!(matches!(err, AssetBuildError::BoundsExceeded { .. }));
     }
 }
