@@ -33,6 +33,7 @@ members = [
     "crates/microcircuit_sn_stub",
     "crates/microcircuit_sn_attractor",
     "crates/microcircuit_sn_biophys",
+    "crates/microcircuit_sn_l4",
     "crates/microcircuit_lc_stub",
     "crates/microcircuit_lc_spike",
     "crates/microcircuit_lc_biophys",
