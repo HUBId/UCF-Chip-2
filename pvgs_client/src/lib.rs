@@ -6,6 +6,7 @@ pub mod local;
 pub use local::{LocalAssetBundleWriter, LocalPvgsReader, LocalPvgsWriter};
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use thiserror::Error;
 use ucf::v1::{
     AssetBundle, AssetManifest, CharacterBaselineVector, MicrocircuitConfigEvidence,
@@ -50,6 +51,14 @@ pub trait PvgsReader: Send + Sync {
     fn get_latest_ruleset_digest(&self) -> Option<[u8; 32]> {
         None
     }
+
+    fn get_latest_asset_bundle(&mut self) -> Result<Option<AssetBundle>, PvgsError> {
+        Ok(None)
+    }
+
+    fn get_asset_bundle(&mut self, _digest: [u8; 32]) -> Result<Option<AssetBundle>, PvgsError> {
+        Ok(None)
+    }
 }
 
 pub trait PvgsWriter: Send {
@@ -76,9 +85,48 @@ pub struct MockPvgsReader {
     pub ruleset_digest: Option<[u8; 32]>,
     pub cbv: Option<CharacterBaselineVector>,
     pub pev: Option<PolicyEcologyVector>,
+    pub asset_bundles: Vec<AssetBundle>,
+    pub asset_bundle_index: HashMap<[u8; 32], AssetBundle>,
+    pub latest_asset_bundle: Option<AssetBundle>,
 }
 
 impl MockPvgsReader {
+    fn deterministic_bundle() -> AssetBundle {
+        AssetBundle {
+            bundle_id: "bundle:mock".to_string(),
+            created_at_ms: 0,
+            bundle_digest: vec![0u8; 32],
+            manifest: None,
+            chunks: Vec::new(),
+        }
+    }
+
+    pub fn with_asset_bundle(bundle: AssetBundle) -> Self {
+        let mut index = HashMap::new();
+        if bundle.bundle_digest.len() == 32 {
+            let mut digest = [0u8; 32];
+            digest.copy_from_slice(&bundle.bundle_digest);
+            index.insert(digest, bundle.clone());
+        }
+        let asset_bundles = vec![bundle.clone()];
+        Self {
+            latest_asset_bundle: Some(bundle),
+            asset_bundles,
+            asset_bundle_index: index,
+            ..Default::default()
+        }
+    }
+
+    pub fn push_asset_bundle(&mut self, bundle: AssetBundle) {
+        if bundle.bundle_digest.len() == 32 {
+            let mut digest = [0u8; 32];
+            digest.copy_from_slice(&bundle.bundle_digest);
+            self.asset_bundle_index.insert(digest, bundle.clone());
+        }
+        self.latest_asset_bundle = Some(bundle.clone());
+        self.asset_bundles.push(bundle);
+    }
+
     pub fn with_cbv(cbv_digest: [u8; 32]) -> Self {
         Self::with_cbv_digest(cbv_digest)
     }
@@ -131,6 +179,25 @@ impl PvgsReader for MockPvgsReader {
 
     fn get_latest_ruleset_digest(&self) -> Option<[u8; 32]> {
         self.ruleset_digest
+    }
+
+    fn get_latest_asset_bundle(&mut self) -> Result<Option<AssetBundle>, PvgsError> {
+        let bundle = self
+            .latest_asset_bundle
+            .clone()
+            .or_else(|| self.asset_bundles.last().cloned())
+            .unwrap_or_else(Self::deterministic_bundle);
+        Ok(Some(bundle))
+    }
+
+    fn get_asset_bundle(&mut self, digest: [u8; 32]) -> Result<Option<AssetBundle>, PvgsError> {
+        if let Some(bundle) = self.asset_bundle_index.get(&digest).cloned() {
+            return Ok(Some(bundle));
+        }
+        if digest == [0u8; 32] {
+            return Ok(Some(Self::deterministic_bundle()));
+        }
+        Ok(None)
     }
 }
 
@@ -215,6 +282,14 @@ pub struct PlaceholderPvgsClient;
 impl PvgsReader for PlaceholderPvgsClient {
     fn get_latest_cbv_digest(&self) -> Option<[u8; 32]> {
         None
+    }
+
+    fn get_latest_asset_bundle(&mut self) -> Result<Option<AssetBundle>, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn get_asset_bundle(&mut self, _digest: [u8; 32]) -> Result<Option<AssetBundle>, PvgsError> {
+        Err(PvgsError::NotImplemented)
     }
 }
 
@@ -452,5 +527,18 @@ mod tests {
 
         let reader = LocalPvgsReader::new(store);
         assert_eq!(reader.get_latest_cbv(), Some(cbv));
+    }
+
+    #[test]
+    fn mock_reader_returns_deterministic_asset_bundle() {
+        let mut reader = MockPvgsReader::default();
+        let bundle = reader
+            .get_latest_asset_bundle()
+            .expect("asset bundle query")
+            .expect("bundle");
+
+        assert_eq!(bundle.bundle_id, "bundle:mock");
+        assert_eq!(bundle.bundle_digest, vec![0u8; 32]);
+        assert!(bundle.chunks.is_empty());
     }
 }

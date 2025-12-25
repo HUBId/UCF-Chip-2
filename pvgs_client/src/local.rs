@@ -2,8 +2,8 @@
 
 use crate::{PvgsError, PvgsReader, PvgsWriter};
 use chip4::pvgs::{
-    AssetBundleAppend, AssetBundleCommit, AssetManifestAppend, AssetManifestCommit, CbvQuery,
-    Digest32, MicrocircuitConfigCommit, PevQuery,
+    AssetBundleAppend, AssetBundleCommit, AssetBundleQuery, AssetManifestAppend,
+    AssetManifestCommit, CbvQuery, Digest32, MicrocircuitConfigCommit, PevQuery,
 };
 use ucf::v1::{
     AssetBundle, AssetManifest, CharacterBaselineVector, MicrocircuitConfigAppend,
@@ -32,7 +32,7 @@ impl<Q: CbvQuery> LocalPvgsReader<Q> {
     }
 }
 
-impl<Q: CbvQuery + PevQuery> PvgsReader for LocalPvgsReader<Q> {
+impl<Q: CbvQuery + PevQuery + AssetBundleQuery> PvgsReader for LocalPvgsReader<Q> {
     fn get_latest_cbv_digest(&self) -> Option<[u8; 32]> {
         self.query
             .get_latest_cbv()
@@ -53,6 +53,14 @@ impl<Q: CbvQuery + PevQuery> PvgsReader for LocalPvgsReader<Q> {
 
     fn get_latest_pev(&self) -> Option<PolicyEcologyVector> {
         self.query.get_latest_pev().and_then(|pev| pev.pev)
+    }
+
+    fn get_latest_asset_bundle(&mut self) -> Result<Option<AssetBundle>, PvgsError> {
+        Ok(self.query.get_latest_asset_bundle())
+    }
+
+    fn get_asset_bundle(&mut self, digest: [u8; 32]) -> Result<Option<AssetBundle>, PvgsError> {
+        Ok(self.query.get_asset_bundle(digest))
     }
 }
 
