@@ -473,8 +473,7 @@ mod tests {
         build_asset_bundle_with_policy, chunk_asset, BundleIdPolicy, ChunkerConfig,
     };
     use biophys_assets::{
-        demo_channel_params, demo_connectivity, demo_morphology_3comp, demo_syn_params,
-        to_asset_digest,
+        demo_connectivity, demo_morphology_3comp, demo_syn_params, to_asset_digest,
     };
     use biophys_core::{
         LifParams, LifState, ModChannel, NeuronId, StpParams, StpState, SynapseEdge, STP_SCALE,
