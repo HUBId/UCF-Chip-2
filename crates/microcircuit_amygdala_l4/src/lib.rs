@@ -344,7 +344,8 @@ impl AmygdalaL4Microcircuit {
                     }
                     #[cfg(not(feature = "biophys-l4-stp"))]
                     {
-                        return biophys_core::STP_SCALE;
+                        let _ = idx;
+                        biophys_core::STP_SCALE
                     }
                 },
             );
