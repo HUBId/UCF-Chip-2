@@ -2,7 +2,11 @@
 
 use dbm_core::DbmModule;
 pub use microcircuit_amygdala_stub::{AmyInput, AmyOutput, AmyRules};
-#[cfg(any(feature = "microcircuit-amygdala-pop", feature = "biophys-amygdala"))]
+#[cfg(any(
+    feature = "microcircuit-amygdala-pop",
+    feature = "biophys-amygdala",
+    feature = "biophys-l4-amygdala"
+))]
 use microcircuit_core::CircuitConfig;
 use microcircuit_core::MicrocircuitBackend;
 use std::fmt;
@@ -37,20 +41,26 @@ pub struct Amygdala {
 
 impl Amygdala {
     pub fn new() -> Self {
-        #[cfg(feature = "biophys-amygdala")]
+        #[cfg(feature = "biophys-l4-amygdala")]
+        {
+            Self::new_l4(CircuitConfig::default())
+        }
+        #[cfg(all(feature = "biophys-amygdala", not(feature = "biophys-l4-amygdala")))]
         {
             Self::new_biophys(CircuitConfig::default())
         }
         #[cfg(all(
             feature = "microcircuit-amygdala-pop",
-            not(feature = "biophys-amygdala")
+            not(feature = "biophys-amygdala"),
+            not(feature = "biophys-l4-amygdala")
         ))]
         {
             Self::new_micro(CircuitConfig::default())
         }
         #[cfg(all(
             not(feature = "microcircuit-amygdala-pop"),
-            not(feature = "biophys-amygdala")
+            not(feature = "biophys-amygdala"),
+            not(feature = "biophys-l4-amygdala")
         ))]
         {
             Self {
@@ -74,6 +84,15 @@ impl Amygdala {
 
         Self {
             backend: AmyBackend::Micro(Box::new(AmygdalaBiophysMicrocircuit::new(config))),
+        }
+    }
+
+    #[cfg(feature = "biophys-l4-amygdala")]
+    pub fn new_l4(config: CircuitConfig) -> Self {
+        use microcircuit_amygdala_l4::AmygdalaL4Microcircuit;
+
+        Self {
+            backend: AmyBackend::Micro(Box::new(AmygdalaL4Microcircuit::new(config))),
         }
     }
 
@@ -172,14 +191,37 @@ mod tests {
     #[test]
     fn vector_order_is_deterministic() {
         let mut module = Amygdala::new();
-        let output = module.tick(&AmyInput {
+        let input = AmyInput {
             replay_mismatch_present: true,
             dlp_secret_present: true,
             policy_pressure: LevelClass::High,
             ..base_input()
-        });
+        };
+        let output = {
+            #[cfg(feature = "biophys-l4-amygdala")]
+            {
+                let mut result = AmyOutput::default();
+                for _ in 0..3 {
+                    result = module.tick(&input);
+                }
+                result
+            }
+            #[cfg(not(feature = "biophys-l4-amygdala"))]
+            {
+                module.tick(&input)
+            }
+        };
 
-        #[cfg(feature = "biophys-amygdala")]
+        #[cfg(feature = "biophys-l4-amygdala")]
+        {
+            let expected = [
+                ThreatVector::IntegrityCompromise,
+                ThreatVector::Exfil,
+                ThreatVector::Probing,
+            ];
+            assert!(output.vectors.starts_with(&expected));
+        }
+        #[cfg(all(feature = "biophys-amygdala", not(feature = "biophys-l4-amygdala")))]
         assert_eq!(
             output.vectors,
             vec![
@@ -188,7 +230,10 @@ mod tests {
                 ThreatVector::Probing,
             ]
         );
-        #[cfg(not(feature = "biophys-amygdala"))]
+        #[cfg(all(
+            not(feature = "biophys-amygdala"),
+            not(feature = "biophys-l4-amygdala")
+        ))]
         assert_eq!(
             output.vectors,
             vec![

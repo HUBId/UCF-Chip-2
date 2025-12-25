@@ -242,6 +242,7 @@ dependencies = [
  "biophys_core",
  "dbm_core",
  "microcircuit_amygdala_biophys",
+ "microcircuit_amygdala_l4",
  "microcircuit_amygdala_pop",
  "microcircuit_amygdala_stub",
  "microcircuit_core",
@@ -472,6 +473,22 @@ version = "0.1.0"
 dependencies = [
  "biophys_core",
  "biophys_runtime",
+ "dbm_core",
+ "microcircuit_amygdala_stub",
+ "microcircuit_core",
+]
+
+[[package]]
+name = "microcircuit_amygdala_l4"
+version = "0.1.0"
+dependencies = [
+ "biophys_channels",
+ "biophys_compartmental_solver",
+ "biophys_core",
+ "biophys_event_queue_l4",
+ "biophys_morphology",
+ "biophys_synapses_l4",
+ "blake3",
  "dbm_core",
  "microcircuit_amygdala_stub",
  "microcircuit_core",
