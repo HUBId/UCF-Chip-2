@@ -10,6 +10,14 @@ path = "src/lib.rs"
 microcircuit-sn = []
 microcircuit-sn-attractor = ["microcircuit-sn", "microcircuit_sn_attractor"]
 biophys = []
+biophys-l4 = ["biophys"]
+biophys-l4-synapses = ["biophys-l4"]
+biophys-l4-sn = [
+    "microcircuit-sn",
+    "dep:microcircuit_sn_l4",
+    "microcircuit_sn_l4/biophys-l4-sn",
+    "biophys-l4-synapses",
+]
 biophys-sn = [
     "microcircuit-sn",
     "dep:microcircuit_sn_biophys",
@@ -23,3 +31,4 @@ microcircuit_core = { path = "../microcircuit_core" }
 microcircuit_sn_attractor = { path = "../microcircuit_sn_attractor", optional = true }
 microcircuit_sn_stub = { path = "../microcircuit_sn_stub" }
 microcircuit_sn_biophys = { path = "../microcircuit_sn_biophys", optional = true }
+microcircuit_sn_l4 = { path = "../microcircuit_sn_l4", optional = true }

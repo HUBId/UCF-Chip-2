@@ -219,6 +219,15 @@ impl SubstantiaNigra {
 
     #[cfg(feature = "microcircuit-sn")]
     pub fn new_micro(config: CircuitConfig) -> Self {
+        #[cfg(feature = "biophys-l4-sn")]
+        {
+            use microcircuit_sn_l4::SnL4Microcircuit;
+
+            return Self {
+                backend: SnBackend::Micro(Box::new(SnL4Microcircuit::new(config))),
+            };
+        }
+
         #[cfg(feature = "biophys-sn")]
         {
             use microcircuit_sn_biophys::SnBiophysMicrocircuit;

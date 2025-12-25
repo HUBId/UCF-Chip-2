@@ -168,6 +168,7 @@ dependencies = [
  "microcircuit_core",
  "microcircuit_sn_attractor",
  "microcircuit_sn_biophys",
+ "microcircuit_sn_l4",
  "microcircuit_sn_stub",
 ]
 
@@ -721,6 +722,22 @@ version = "0.1.0"
 dependencies = [
  "biophys_core",
  "biophys_runtime",
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_sn_stub",
+]
+
+[[package]]
+name = "microcircuit_sn_l4"
+version = "0.1.0"
+dependencies = [
+ "biophys_channels",
+ "biophys_compartmental_solver",
+ "biophys_core",
+ "biophys_event_queue_l4",
+ "biophys_morphology",
+ "biophys_synapses_l4",
+ "blake3",
  "dbm_core",
  "microcircuit_core",
  "microcircuit_sn_stub",
