@@ -135,6 +135,71 @@ fn partitioned_matches_single_runtime() {
 }
 
 #[test]
+fn partitioned_bucket_overflow_drops_highest_synapse_index() {
+    let params = vec![lif_params(); 2];
+    let states = vec![lif_state(); 2];
+    let stp = StpParams {
+        u: 500,
+        tau_rec_steps: 2,
+        tau_fac_steps: 2,
+        mod_channel: None,
+    };
+    let edges = vec![
+        SynapseEdge {
+            pre: NeuronId(0),
+            post: NeuronId(1),
+            weight_base: 6,
+            weight_effective: 6,
+            delay_steps: 0,
+            mod_channel: ModChannel::None,
+            stp: StpState { x: 1000, u: 500 },
+        },
+        SynapseEdge {
+            pre: NeuronId(0),
+            post: NeuronId(1),
+            weight_base: 6,
+            weight_effective: 6,
+            delay_steps: 0,
+            mod_channel: ModChannel::None,
+            stp: StpState { x: 1000, u: 500 },
+        },
+        SynapseEdge {
+            pre: NeuronId(0),
+            post: NeuronId(1),
+            weight_base: 6,
+            weight_effective: 6,
+            delay_steps: 0,
+            mod_channel: ModChannel::None,
+            stp: StpState { x: 1000, u: 500 },
+        },
+    ];
+    let mut runtime = PartitionedRuntime::new_with_synapses(
+        params,
+        states,
+        1,
+        10,
+        PartitionPlan {
+            partitions: vec![Partition {
+                id: 0,
+                neuron_start: 0,
+                neuron_end: 2,
+            }],
+        },
+        SynapseConfig {
+            edges,
+            stp_params: vec![stp; 3],
+            max_events_per_step: 1,
+        },
+    );
+
+    let inputs = vec![10, 0];
+    let _ = runtime.step(&inputs);
+    assert_eq!(runtime.dropped_event_count, 2);
+    assert_eq!(runtime.event_queue[0][0].len(), 1);
+    assert_eq!(runtime.event_queue[0][0][0].synapse_index, 0);
+}
+
+#[test]
 fn partitioned_is_deterministic() {
     let params = vec![lif_params(); 6];
     let states = vec![lif_state(); 6];

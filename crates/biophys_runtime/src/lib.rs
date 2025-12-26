@@ -25,7 +25,7 @@ pub struct BiophysRuntime {
     pub current_modulators: ModulatorField,
     pub edges: Vec<SynapseEdge>,
     pub stp_params: Vec<StpParams>,
-    pub pre_index: Vec<Vec<usize>>,
+    pub pre_index: CsrAdjacency,
     pub event_queue: Vec<Vec<SpikeEvent>>,
     pub max_events_per_step: usize,
     pub dropped_event_count: u64,
@@ -37,6 +37,7 @@ pub struct SpikeEvent {
     pub deliver_at_step: u64,
     pub post: NeuronId,
     pub current: i32,
+    pub synapse_index: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -55,6 +56,52 @@ pub struct SynapseConfig {
     pub edges: Vec<SynapseEdge>,
     pub stp_params: Vec<StpParams>,
     pub max_events_per_step: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct CsrAdjacency {
+    pub row_offsets: Vec<usize>,
+    pub col_indices: Vec<usize>,
+}
+
+impl CsrAdjacency {
+    pub fn build(neuron_count: usize, edges: &[SynapseEdge]) -> Self {
+        let mut row_offsets = vec![0usize; neuron_count.saturating_add(1)];
+        let mut col_indices = Vec::with_capacity(edges.len());
+        let mut edge_idx = 0usize;
+        for neuron in 0..neuron_count {
+            row_offsets[neuron] = edge_idx;
+            while edge_idx < edges.len() && edges[edge_idx].pre.0 as usize == neuron {
+                col_indices.push(edge_idx);
+                edge_idx = edge_idx.saturating_add(1);
+            }
+        }
+        if neuron_count > 0 {
+            row_offsets[neuron_count] = edge_idx;
+        }
+        debug_assert_eq!(
+            edge_idx,
+            edges.len(),
+            "edges must be sorted by pre for CSR build"
+        );
+        Self {
+            row_offsets,
+            col_indices,
+        }
+    }
+
+    pub fn outgoing(&self, neuron_idx: usize) -> &[usize] {
+        if neuron_idx >= self.neuron_count() {
+            return &[];
+        }
+        let start = self.row_offsets[neuron_idx];
+        let end = self.row_offsets[neuron_idx.saturating_add(1)];
+        &self.col_indices[start..end]
+    }
+
+    pub fn neuron_count(&self) -> usize {
+        self.row_offsets.len().saturating_sub(1)
+    }
 }
 
 fn compute_effective_weight(mods: ModulatorField, weight_base: i32, channel: ModChannel) -> i32 {
@@ -114,7 +161,7 @@ fn deliver_events(
     counters.events_delivered = counters
         .events_delivered
         .saturating_add(events.len() as u64);
-    events.sort_by_key(|event| event.post.0);
+    events.sort_by_key(|event| (event.post.0, event.synapse_index));
     for event in events {
         let post_idx = event.post.0 as usize;
         if post_idx < syn_inputs.len() {
@@ -123,12 +170,87 @@ fn deliver_events(
     }
 }
 
+fn deliver_partitioned_events(
+    step_count: u64,
+    event_queue: &mut [Vec<Vec<SpikeEvent>>],
+    partition_plan: &PartitionPlan,
+    partition_input_buffers: &mut [Vec<i32>],
+    counters: &mut RuntimeCounters,
+) {
+    if event_queue.is_empty() {
+        return;
+    }
+    let bucket = (step_count as usize) % event_queue.len();
+    for (partition_idx, partition) in partition_plan.partitions.iter().enumerate() {
+        let buffer = &mut partition_input_buffers[partition_idx];
+        buffer.fill(0);
+        let mut events = std::mem::take(&mut event_queue[bucket][partition_idx]);
+        counters.events_delivered = counters
+            .events_delivered
+            .saturating_add(events.len() as u64);
+        if events.is_empty() {
+            continue;
+        }
+        events.sort_by_key(|event| (event.post.0, event.synapse_index));
+        for event in events {
+            let local_idx = (event.post.0 - partition.neuron_start) as usize;
+            if local_idx < buffer.len() {
+                buffer[local_idx] = buffer[local_idx].saturating_add(event.current);
+            }
+        }
+    }
+}
+
+fn push_event_with_limit(
+    bucket: &mut Vec<SpikeEvent>,
+    event: SpikeEvent,
+    max_events_per_step: usize,
+    dropped_event_count: &mut u64,
+    counters: &mut RuntimeCounters,
+) -> bool {
+    if bucket.len() >= max_events_per_step {
+        if let Some((max_idx, max_value)) = bucket
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, queued)| queued.synapse_index)
+            .map(|(idx, queued)| (idx, queued.synapse_index))
+        {
+            if event.synapse_index < max_value {
+                bucket[max_idx] = event;
+                counters.events_pushed = counters.events_pushed.saturating_add(1);
+            }
+        }
+        *dropped_event_count = dropped_event_count.saturating_add(1);
+        counters.events_dropped = counters.events_dropped.saturating_add(1);
+        return false;
+    }
+    bucket.push(event);
+    counters.events_pushed = counters.events_pushed.saturating_add(1);
+    let depth = bucket.len() as u32;
+    if depth > counters.max_bucket_depth_seen {
+        counters.max_bucket_depth_seen = depth;
+    }
+    true
+}
+
 struct ScheduleContext<'a> {
-    pre_index: &'a [Vec<usize>],
+    pre_index: &'a CsrAdjacency,
     edges: &'a mut [SynapseEdge],
     stp_params: &'a [StpParams],
     mods: ModulatorField,
     event_queue: &'a mut [Vec<SpikeEvent>],
+    max_events_per_step: usize,
+    dropped_event_count: &'a mut u64,
+    counters: &'a mut RuntimeCounters,
+}
+
+struct PartitionedScheduleContext<'a> {
+    pre_index: &'a CsrAdjacency,
+    edges: &'a mut [SynapseEdge],
+    stp_params: &'a [StpParams],
+    mods: ModulatorField,
+    event_queue: &'a mut [Vec<Vec<SpikeEvent>>],
+    neuron_to_partition: &'a [usize],
     max_events_per_step: usize,
     dropped_event_count: &'a mut u64,
     counters: &'a mut RuntimeCounters,
@@ -140,10 +262,10 @@ fn schedule_spikes(spikes: &[NeuronId], step_count: u64, context: &mut ScheduleC
     }
     for spike in spikes {
         let pre_idx = spike.0 as usize;
-        if pre_idx >= context.pre_index.len() {
+        if pre_idx >= context.pre_index.neuron_count() {
             continue;
         }
-        for &edge_idx in &context.pre_index[pre_idx] {
+        for &edge_idx in context.pre_index.outgoing(pre_idx) {
             let edge = &mut context.edges[edge_idx];
             let params = context.stp_params[edge_idx];
             let effective_params = modulated_stp_params(context.mods, edge, params);
@@ -151,21 +273,58 @@ fn schedule_spikes(spikes: &[NeuronId], step_count: u64, context: &mut ScheduleC
             let current = (edge.weight_effective as i64 * released as i64 / 1000) as i32;
             let deliver_at_step = step_count.saturating_add(edge.delay_steps as u64);
             let bucket = (deliver_at_step as usize) % context.event_queue.len();
-            if context.event_queue[bucket].len() >= context.max_events_per_step {
-                *context.dropped_event_count = context.dropped_event_count.saturating_add(1);
-                context.counters.events_dropped = context.counters.events_dropped.saturating_add(1);
-                continue;
-            }
-            context.event_queue[bucket].push(SpikeEvent {
+            let event = SpikeEvent {
                 deliver_at_step,
                 post: edge.post,
                 current,
-            });
-            context.counters.events_pushed = context.counters.events_pushed.saturating_add(1);
-            let depth = context.event_queue[bucket].len() as u32;
-            if depth > context.counters.max_bucket_depth_seen {
-                context.counters.max_bucket_depth_seen = depth;
-            }
+                synapse_index: edge_idx,
+            };
+            let _ = push_event_with_limit(
+                &mut context.event_queue[bucket],
+                event,
+                context.max_events_per_step,
+                context.dropped_event_count,
+                context.counters,
+            );
+        }
+    }
+}
+
+fn schedule_spikes_partitioned(
+    spikes: &[NeuronId],
+    step_count: u64,
+    context: &mut PartitionedScheduleContext<'_>,
+) {
+    if context.event_queue.is_empty() || context.edges.is_empty() {
+        return;
+    }
+    for spike in spikes {
+        let pre_idx = spike.0 as usize;
+        if pre_idx >= context.pre_index.neuron_count() {
+            continue;
+        }
+        for &edge_idx in context.pre_index.outgoing(pre_idx) {
+            let edge = &mut context.edges[edge_idx];
+            let params = context.stp_params[edge_idx];
+            let effective_params = modulated_stp_params(context.mods, edge, params);
+            let released = edge.stp.on_spike(effective_params);
+            let current = (edge.weight_effective as i64 * released as i64 / 1000) as i32;
+            let deliver_at_step = step_count.saturating_add(edge.delay_steps as u64);
+            let bucket = (deliver_at_step as usize) % context.event_queue.len();
+            let partition_idx = context.neuron_to_partition[edge.post.0 as usize];
+            let event = SpikeEvent {
+                deliver_at_step,
+                post: edge.post,
+                current,
+                synapse_index: edge_idx,
+            };
+            let _ = push_event_with_limit(
+                &mut context.event_queue[bucket][partition_idx],
+                event,
+                context.max_events_per_step,
+                context.dropped_event_count,
+                context.counters,
+            );
         }
     }
 }
@@ -229,16 +388,16 @@ impl BiophysRuntime {
             edges.is_empty() || edges.len() == stp_params.len(),
             "edges/stp_params mismatch"
         );
-        let mut pre_index = vec![Vec::new(); states.len()];
+        let (edges, stp_params) = sort_synapses(edges, stp_params);
         let mut max_delay = 0u16;
-        for (idx, edge) in edges.iter().enumerate() {
+        for edge in &edges {
             let pre_idx = edge.pre.0 as usize;
             let post_idx = edge.post.0 as usize;
             assert!(pre_idx < states.len(), "edge pre out of range");
             assert!(post_idx < states.len(), "edge post out of range");
-            pre_index[pre_idx].push(idx);
             max_delay = max_delay.max(edge.delay_steps);
         }
+        let pre_index = CsrAdjacency::build(states.len(), &edges);
         let queue_len = max_delay as usize + 1;
         Self {
             params,
@@ -378,12 +537,13 @@ pub struct PartitionedRuntime {
     pub current_modulators: ModulatorField,
     pub edges: Vec<SynapseEdge>,
     pub stp_params: Vec<StpParams>,
-    pub pre_index: Vec<Vec<usize>>,
-    pub event_queue: Vec<Vec<SpikeEvent>>,
+    pub pre_index: CsrAdjacency,
+    pub event_queue: Vec<Vec<Vec<SpikeEvent>>>,
     pub max_events_per_step: usize,
     pub dropped_event_count: u64,
     counters: RuntimeCounters,
     pub partition_plan: PartitionPlan,
+    neuron_to_partition: Vec<usize>,
     partition_spike_buffers: Vec<Vec<NeuronId>>,
     partition_input_buffers: Vec<Vec<i32>>,
     partition_merge_order: Vec<usize>,
@@ -428,18 +588,19 @@ impl PartitionedRuntime {
         partition_plan
             .validate(states.len() as u32)
             .expect("invalid partition plan");
-        let mut pre_index = vec![Vec::new(); states.len()];
+        let (edges, stp_params) = sort_synapses(synapses.edges, synapses.stp_params);
         let mut max_delay = 0u16;
-        for (idx, edge) in synapses.edges.iter().enumerate() {
+        for edge in &edges {
             let pre_idx = edge.pre.0 as usize;
             let post_idx = edge.post.0 as usize;
             assert!(pre_idx < states.len(), "edge pre out of range");
             assert!(post_idx < states.len(), "edge post out of range");
-            pre_index[pre_idx].push(idx);
             max_delay = max_delay.max(edge.delay_steps);
         }
+        let pre_index = CsrAdjacency::build(states.len(), &edges);
         let queue_len = max_delay as usize + 1;
-        let partition_spike_buffers = vec![Vec::new(); partition_plan.partitions.len()];
+        let partition_count = partition_plan.partitions.len();
+        let partition_spike_buffers = vec![Vec::new(); partition_count];
         let partition_input_buffers = partition_plan
             .partitions
             .iter()
@@ -447,6 +608,12 @@ impl PartitionedRuntime {
             .collect();
         let mut partition_merge_order: Vec<usize> = (0..partition_plan.partitions.len()).collect();
         partition_merge_order.sort_by_key(|idx| partition_plan.partitions[*idx].id);
+        let mut neuron_to_partition = vec![0usize; states.len()];
+        for (partition_idx, partition) in partition_plan.partitions.iter().enumerate() {
+            for neuron in partition.neuron_start..partition.neuron_end {
+                neuron_to_partition[neuron as usize] = partition_idx;
+            }
+        }
         Self {
             params,
             states,
@@ -454,14 +621,15 @@ impl PartitionedRuntime {
             step_count: 0,
             max_spikes_per_step,
             current_modulators: ModulatorField::default(),
-            edges: synapses.edges,
-            stp_params: synapses.stp_params,
+            edges,
+            stp_params,
             pre_index,
-            event_queue: vec![Vec::new(); queue_len.max(1)],
+            event_queue: vec![vec![Vec::new(); partition_count]; queue_len.max(1)],
             max_events_per_step: synapses.max_events_per_step,
             dropped_event_count: 0,
             counters: RuntimeCounters::default(),
             partition_plan,
+            neuron_to_partition,
             partition_spike_buffers,
             partition_input_buffers,
             partition_merge_order,
@@ -573,14 +741,13 @@ impl PartitionedRuntime {
             }
         }
 
-        let mut syn_inputs = vec![0i32; self.states.len()];
-        deliver_events(
+        deliver_partitioned_events(
             self.step_count,
             &mut self.event_queue,
-            &mut syn_inputs,
+            &self.partition_plan,
+            &mut self.partition_input_buffers,
             &mut self.counters,
         );
-        self.fill_partition_inputs(&syn_inputs);
 
         #[cfg(feature = "biophys-parallel")]
         if parallel {
@@ -606,34 +773,21 @@ impl PartitionedRuntime {
             .spikes_total
             .saturating_add(merged_spikes.len() as u64);
 
-        let mut schedule_context = ScheduleContext {
+        let mut schedule_context = PartitionedScheduleContext {
             pre_index: &self.pre_index,
             edges: &mut self.edges,
             stp_params: &self.stp_params,
             mods,
             event_queue: &mut self.event_queue,
+            neuron_to_partition: &self.neuron_to_partition,
             max_events_per_step: self.max_events_per_step,
             dropped_event_count: &mut self.dropped_event_count,
             counters: &mut self.counters,
         };
-        schedule_spikes(&merged_spikes, self.step_count, &mut schedule_context);
+        schedule_spikes_partitioned(&merged_spikes, self.step_count, &mut schedule_context);
         self.step_count = self.step_count.saturating_add(1);
         PopCode {
             spikes: merged_spikes,
-        }
-    }
-
-    fn fill_partition_inputs(&mut self, syn_inputs: &[i32]) {
-        for (partition, buffer) in self
-            .partition_plan
-            .partitions
-            .iter()
-            .zip(self.partition_input_buffers.iter_mut())
-        {
-            let start = partition.neuron_start as usize;
-            let end = partition.neuron_end as usize;
-            buffer.clear();
-            buffer.extend_from_slice(&syn_inputs[start..end]);
         }
     }
 
@@ -733,6 +887,37 @@ impl BiophysCircuit<[i32], PopCode> for PartitionedRuntime {
 
 fn update_u16(hasher: &mut blake3::Hasher, value: u16) {
     hasher.update(&value.to_le_bytes());
+}
+
+fn sort_synapses(
+    edges: Vec<SynapseEdge>,
+    stp_params: Vec<StpParams>,
+) -> (Vec<SynapseEdge>, Vec<StpParams>) {
+    if edges.is_empty() {
+        return (edges, stp_params);
+    }
+    let mut combined: Vec<(SynapseEdge, StpParams, usize)> = edges
+        .into_iter()
+        .zip(stp_params.into_iter())
+        .enumerate()
+        .map(|(idx, (edge, params))| (edge, params, idx))
+        .collect();
+    combined.sort_by_key(|(edge, _params, idx)| {
+        (
+            edge.pre.0,
+            edge.post.0,
+            *idx as u32,
+            edge.delay_steps,
+            mod_channel_code(edge.mod_channel),
+        )
+    });
+    let mut edges = Vec::with_capacity(combined.len());
+    let mut stp_params = Vec::with_capacity(combined.len());
+    for (edge, params, _idx) in combined {
+        edges.push(edge);
+        stp_params.push(params);
+    }
+    (edges, stp_params)
 }
 
 fn update_u32(hasher: &mut blake3::Hasher, value: u32) {
