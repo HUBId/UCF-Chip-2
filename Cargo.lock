@@ -937,6 +937,7 @@ dependencies = [
  "dbm_core",
  "microcircuit_core",
  "microcircuit_sn_stub",
+ "prost",
  "ucf-protocol",
 ]
 

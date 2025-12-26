@@ -2019,7 +2019,7 @@ mod asset_tests {
         let chunker = ChunkerConfig {
             max_chunk_bytes: 128,
             compression: Compression::None,
-            max_chunks_total: 512,
+            max_chunks_total: 4096,
             bundle_id_policy: BundleIdPolicy::ManifestDigestPrefix { prefix_len: 8 },
         };
         let mut chunks = Vec::new();
@@ -2068,6 +2068,11 @@ mod asset_tests {
             )
             .expect("conn chunks"),
         );
+        chunks.sort_by(|a, b| {
+            a.asset_digest
+                .cmp(&b.asset_digest)
+                .then_with(|| a.chunk_index.cmp(&b.chunk_index))
+        });
 
         build_asset_bundle_with_policy(
             manifest,
