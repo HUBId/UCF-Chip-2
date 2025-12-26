@@ -105,6 +105,8 @@ pub mod v1 {
         Lc = 1,
         Sn = 2,
         Hpa = 3,
+        Amygdala = 4,
+        Hypothalamus = 5,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enumeration)]
@@ -222,6 +224,50 @@ pub mod v1 {
     pub struct MicrocircuitConfigAppend {
         #[prost(message, optional, tag = "1")]
         pub evidence: Option<MicrocircuitConfigEvidence>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct Digest32 {
+        #[prost(bytes, tag = "1")]
+        pub value: ::prost::alloc::vec::Vec<u8>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct Ref {
+        #[prost(string, tag = "1")]
+        pub id: ::prost::alloc::string::String,
+        #[prost(bytes, tag = "2")]
+        pub digest: ::prost::alloc::vec::Vec<u8>,
+    }
+
+    #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]
+    pub struct ReplayRunEvidence {
+        #[prost(string, tag = "1")]
+        pub run_id: ::prost::alloc::string::String,
+        #[prost(message, optional, tag = "2")]
+        pub run_digest: Option<Digest32>,
+        #[prost(message, optional, tag = "3")]
+        pub replay_plan_ref: Option<Ref>,
+        #[prost(message, optional, tag = "4")]
+        pub asset_manifest_ref: Option<Ref>,
+        #[prost(message, repeated, tag = "5")]
+        pub micro_configs: ::prost::alloc::vec::Vec<MicrocircuitConfigEvidence>,
+        #[prost(uint32, tag = "6")]
+        pub steps: u32,
+        #[prost(uint32, tag = "7")]
+        pub dt_us: u32,
+        #[prost(uint32, tag = "8")]
+        pub substeps_per_tick: u32,
+        #[prost(message, optional, tag = "9")]
+        pub summary_profile_seq_digest: Option<Digest32>,
+        #[prost(message, optional, tag = "10")]
+        pub summary_dwm_seq_digest: Option<Digest32>,
+        #[prost(uint64, tag = "11")]
+        pub created_at_ms: u64,
+        #[prost(bytes, optional, tag = "12")]
+        pub proof_receipt_ref: Option<::prost::alloc::vec::Vec<u8>>,
+        #[prost(bytes, repeated, tag = "13")]
+        pub signatures: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
     }
 
     #[derive(Clone, PartialEq, Serialize, Deserialize, Message)]

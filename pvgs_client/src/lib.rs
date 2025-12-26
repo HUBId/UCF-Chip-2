@@ -7,10 +7,11 @@ pub use local::{LocalAssetBundleWriter, LocalPvgsReader, LocalPvgsWriter};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use thiserror::Error;
 use ucf::v1::{
     AssetBundle, AssetManifest, CharacterBaselineVector, MicrocircuitConfigEvidence,
-    PolicyEcologyVector, PvgsReceipt,
+    PolicyEcologyVector, PvgsReceipt, ReplayRunEvidence,
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -108,6 +109,11 @@ pub trait PvgsWriter: Send {
     fn commit_asset_manifest(&mut self, manifest: AssetManifest) -> Result<PvgsReceipt, PvgsError>;
 
     fn commit_asset_bundle(&mut self, bundle: AssetBundle) -> Result<PvgsReceipt, PvgsError>;
+
+    fn commit_replay_run_evidence(
+        &mut self,
+        evidence: ReplayRunEvidence,
+    ) -> Result<PvgsReceipt, PvgsError>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -243,6 +249,8 @@ pub struct MockPvgsWriter {
     pub committed_microcircuit_configs: Vec<MicrocircuitConfigEvidence>,
     pub committed_asset_manifests: Vec<AssetManifest>,
     pub committed_asset_bundles: Vec<AssetBundle>,
+    pub committed_replay_runs: Vec<ReplayRunEvidence>,
+    pub committed_replay_run_digests: HashSet<[u8; 32]>,
     pub fail_with: Option<String>,
 }
 
@@ -253,6 +261,8 @@ impl MockPvgsWriter {
             committed_microcircuit_configs: Vec::new(),
             committed_asset_manifests: Vec::new(),
             committed_asset_bundles: Vec::new(),
+            committed_replay_runs: Vec::new(),
+            committed_replay_run_digests: HashSet::new(),
             fail_with: Some(reason.into()),
         }
     }
@@ -310,6 +320,26 @@ impl PvgsWriter for MockPvgsWriter {
         self.committed_asset_bundles.push(bundle);
         Ok(PvgsReceipt::default())
     }
+
+    fn commit_replay_run_evidence(
+        &mut self,
+        evidence: ReplayRunEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        if let Some(reason) = &self.fail_with {
+            return Err(PvgsError::CommitFailed {
+                reason: reason.clone(),
+            });
+        }
+
+        if let Some(digest) = replay_run_digest(&evidence) {
+            if !self.committed_replay_run_digests.insert(digest) {
+                return Ok(PvgsReceipt::default());
+            }
+        }
+
+        self.committed_replay_runs.push(evidence);
+        Ok(PvgsReceipt::default())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -359,6 +389,23 @@ impl PvgsWriter for PlaceholderPvgsClient {
     fn commit_asset_bundle(&mut self, _bundle: AssetBundle) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }
+
+    fn commit_replay_run_evidence(
+        &mut self,
+        _evidence: ReplayRunEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+}
+
+fn replay_run_digest(evidence: &ReplayRunEvidence) -> Option<[u8; 32]> {
+    let digest = evidence.run_digest.as_ref()?.value.as_slice();
+    if digest.len() != 32 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(digest);
+    Some(out)
 }
 
 #[cfg(test)]
@@ -452,6 +499,34 @@ mod tests {
 
         assert_eq!(writer.committed_asset_bundles.len(), 1);
         assert_eq!(writer.committed_asset_bundles[0], bundle);
+    }
+
+    #[test]
+    fn mock_writer_commits_replay_run_once() {
+        let mut writer = MockPvgsWriter::default();
+        let run_digest = [8u8; 32];
+        let evidence = ucf::v1::ReplayRunEvidence {
+            run_id: "replay_run:session:replay:deadbeef".to_string(),
+            run_digest: Some(ucf::v1::Digest32 {
+                value: run_digest.to_vec(),
+            }),
+            replay_plan_ref: None,
+            asset_manifest_ref: None,
+            micro_configs: Vec::new(),
+            steps: 0,
+            dt_us: 0,
+            substeps_per_tick: 0,
+            summary_profile_seq_digest: None,
+            summary_dwm_seq_digest: None,
+            created_at_ms: 0,
+            proof_receipt_ref: None,
+            signatures: Vec::new(),
+        };
+
+        writer.commit_replay_run_evidence(evidence.clone()).unwrap();
+        writer.commit_replay_run_evidence(evidence).unwrap();
+
+        assert_eq!(writer.committed_replay_runs.len(), 1);
     }
 
     #[test]

@@ -268,6 +268,13 @@ mod tests {
             self.commits.lock().unwrap().push(bundle);
             Ok(ucf::v1::PvgsReceipt::default())
         }
+
+        fn commit_replay_run_evidence(
+            &mut self,
+            _evidence: ucf::v1::ReplayRunEvidence,
+        ) -> Result<ucf::v1::PvgsReceipt, pvgs_client::PvgsError> {
+            Ok(ucf::v1::PvgsReceipt::default())
+        }
     }
 
     fn build_assets() -> BiophysAssets {
