@@ -1,0 +1,11 @@
+[package]
+name = "replay_evidence"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hex = "0.4"
+ucf = { package = "ucf-protocol", path = "../../ucf-protocol" }
+
+[dev-dependencies]
+prost = "0.12"

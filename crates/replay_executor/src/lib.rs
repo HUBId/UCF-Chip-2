@@ -21,6 +21,8 @@ use thiserror::Error;
 use ucf::v1::{AssetBundle, AssetKind};
 
 const RUN_DIGEST_DOMAIN: &str = "UCF:REPLAY:RUN";
+const PROFILE_SEQ_DIGEST_DOMAIN: &str = "UCF:REPLAY:PROFILE_SEQ";
+const DWM_SEQ_DIGEST_DOMAIN: &str = "UCF:REPLAY:DWM_SEQ";
 const DEFAULT_CACHE_CAPACITY: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +88,8 @@ pub struct ReplayRunReport {
     pub threat_vectors_sequence: Vec<Vec<dbm_core::ThreatVector>>,
     pub profile_sequence: Vec<dbm_core::ProfileState>,
     pub run_digest: [u8; 32],
+    pub summary_profile_seq_digest: [u8; 32],
+    pub summary_dwm_seq_digest: [u8; 32],
 }
 
 #[derive(Debug, Error)]
@@ -205,6 +209,8 @@ impl ReplayExecutor {
         }
 
         let run_digest = digest_run(&dwm_sequence, &threat_vectors_sequence, &profile_sequence);
+        let summary_profile_seq_digest = digest_profile_sequence(&profile_sequence);
+        let summary_dwm_seq_digest = digest_dwm_sequence(&dwm_sequence);
 
         ReplayRunReport {
             steps: clamped_steps,
@@ -212,6 +218,8 @@ impl ReplayExecutor {
             threat_vectors_sequence,
             profile_sequence,
             run_digest,
+            summary_profile_seq_digest,
+            summary_dwm_seq_digest,
         }
     }
 
@@ -392,6 +400,24 @@ fn digest_run(
     }
     for profile in profile_sequence {
         hasher.update(&[profile_code(*profile)]);
+    }
+    *hasher.finalize().as_bytes()
+}
+
+fn digest_profile_sequence(profile_sequence: &[dbm_core::ProfileState]) -> [u8; 32] {
+    let mut hasher = Hasher::new();
+    hasher.update(PROFILE_SEQ_DIGEST_DOMAIN.as_bytes());
+    for profile in profile_sequence {
+        hasher.update(&[profile_code(*profile)]);
+    }
+    *hasher.finalize().as_bytes()
+}
+
+fn digest_dwm_sequence(dwm_sequence: &[dbm_core::DwmMode]) -> [u8; 32] {
+    let mut hasher = Hasher::new();
+    hasher.update(DWM_SEQ_DIGEST_DOMAIN.as_bytes());
+    for dwm in dwm_sequence {
+        hasher.update(&[dwm_code(*dwm)]);
     }
     *hasher.finalize().as_bytes()
 }

@@ -7,7 +7,7 @@ use chip4::pvgs::{
 };
 use ucf::v1::{
     AssetBundle, AssetManifest, CharacterBaselineVector, MicrocircuitConfigAppend,
-    MicrocircuitConfigEvidence, PolicyEcologyVector, PvgsReceipt,
+    MicrocircuitConfigEvidence, PolicyEcologyVector, PvgsReceipt, ReplayRunEvidence,
 };
 
 #[derive(Clone)]
@@ -109,6 +109,13 @@ impl<C: MicrocircuitConfigCommit> PvgsWriter for LocalPvgsWriter<C> {
     fn commit_asset_bundle(&mut self, _bundle: AssetBundle) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }
+
+    fn commit_replay_run_evidence(
+        &mut self,
+        _evidence: ReplayRunEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
 }
 
 #[derive(Clone)]
@@ -145,6 +152,13 @@ impl<C: AssetManifestCommit> PvgsWriter for LocalAssetManifestWriter<C> {
     }
 
     fn commit_asset_bundle(&mut self, _bundle: AssetBundle) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_replay_run_evidence(
+        &mut self,
+        _evidence: ReplayRunEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }
 }
@@ -187,5 +201,12 @@ impl<C: AssetBundleCommit> PvgsWriter for LocalAssetBundleWriter<C> {
         Ok(self.commit.commit_asset_bundle(AssetBundleAppend {
             bundle: Some(bundle),
         }))
+    }
+
+    fn commit_replay_run_evidence(
+        &mut self,
+        _evidence: ReplayRunEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
     }
 }

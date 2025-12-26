@@ -1113,6 +1113,13 @@ mod tests {
         ) -> Result<ucf::v1::PvgsReceipt, PvgsError> {
             Ok(ucf::v1::PvgsReceipt::default())
         }
+
+        fn commit_replay_run_evidence(
+            &mut self,
+            _evidence: ucf::v1::ReplayRunEvidence,
+        ) -> Result<ucf::v1::PvgsReceipt, PvgsError> {
+            Ok(ucf::v1::PvgsReceipt::default())
+        }
     }
 
     fn base_frame() -> SignalFrame {

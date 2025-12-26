@@ -84,6 +84,7 @@ members = [
     "crates/biophys_homeostasis_l4",
     "crates/biophys_targeting_l4",
     "crates/replay_executor",
+    "crates/replay_evidence",
 ]
 resolver = "2"
 
