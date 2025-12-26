@@ -79,7 +79,7 @@ fn build_solver() -> (L4Solver, L4State) {
 fn run_simulation() -> (usize, Vec<f32>) {
     let (mut solver, mut state) = build_solver();
     let mut spike_count = 0;
-    let mut prev_v = state.voltages[0];
+    let mut prev_v = state.comp_v[0];
 
     for step in 0..1000 {
         let mut input = vec![0.0_f32; 3];
@@ -87,14 +87,14 @@ fn run_simulation() -> (usize, Vec<f32>) {
             input[0] = 10.0;
         }
         solver.step(&mut state, &input);
-        let v = state.voltages[0];
+        let v = state.comp_v[0];
         if prev_v < -20.0 && v >= -20.0 {
             spike_count += 1;
         }
         prev_v = v;
     }
 
-    (spike_count, state.voltages)
+    (spike_count, state.comp_v)
 }
 
 #[test]

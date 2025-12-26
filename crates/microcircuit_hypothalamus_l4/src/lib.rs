@@ -690,11 +690,11 @@ impl HypothalamusL4Microcircuit {
             let syn_input = &accumulators[idx];
             let mut input = injected_currents[idx];
             for comp in 0..COMPARTMENT_COUNT {
-                input[comp] += syn_input[comp].total_current(neuron.state.voltages[comp]);
+                input[comp] += syn_input[comp].total_current(neuron.state.comp_v[comp]);
             }
             neuron.solver.step(&mut neuron.state, &input);
             sanitize_voltages(&mut neuron.state);
-            let v = neuron.state.voltages[0];
+            let v = neuron.state.comp_v[0];
             if neuron.last_soma_v < THRESHOLD_MV && v >= THRESHOLD_MV {
                 spikes.push(idx);
             }
@@ -1032,12 +1032,12 @@ impl MicrocircuitBackend<HypoInput, HypoOutput> for HypothalamusL4Microcircuit {
 
         for neuron in &self.neurons {
             update_u64(&mut hasher, neuron.solver.step_count());
-            update_u32(&mut hasher, neuron.state.voltages.len() as u32);
-            for (v, gates) in neuron.state.voltages.iter().zip(neuron.state.gates.iter()) {
-                update_f32(&mut hasher, *v);
-                update_f32(&mut hasher, gates.m);
-                update_f32(&mut hasher, gates.h);
-                update_f32(&mut hasher, gates.n);
+            update_u32(&mut hasher, neuron.state.comp_v.len() as u32);
+            for idx in 0..neuron.state.comp_v.len() {
+                update_f32(&mut hasher, neuron.state.comp_v[idx]);
+                update_f32(&mut hasher, neuron.state.m_q[idx] as f32 / 1000.0);
+                update_f32(&mut hasher, neuron.state.h_q[idx] as f32 / 1000.0);
+                update_f32(&mut hasher, neuron.state.n_q[idx] as f32 / 1000.0);
             }
         }
         for (synapse, state) in self.synapses.iter().zip(self.syn_states.iter()) {
@@ -1177,7 +1177,7 @@ fn build_neuron(neuron_id: u32) -> L4Neuron {
 
     let solver = L4Solver::new(morphology, channels, DT_MS, CLAMP_MIN, CLAMP_MAX).expect("solver");
     let state = L4State::new(-65.0, COMPARTMENT_COUNT);
-    let last_soma_v = state.voltages[0];
+    let last_soma_v = state.comp_v[0];
 
     L4Neuron {
         solver,
@@ -1344,7 +1344,7 @@ fn build_pre_index(neuron_count: usize, synapses: &[SynapseL4]) -> Vec<Vec<usize
 }
 
 fn sanitize_voltages(state: &mut L4State) {
-    for v in &mut state.voltages {
+    for v in &mut state.comp_v {
         if !v.is_finite() {
             *v = CLAMP_MIN;
         } else {
@@ -1500,7 +1500,7 @@ impl CircuitBuilderFromAssets for HypothalamusL4Microcircuit {
                 message: format!("solver init failed: {error:?}"),
             })?;
             let state = L4State::new(-65.0, morphology.compartments.len());
-            let last_soma_v = state.voltages[0];
+            let last_soma_v = state.comp_v[0];
             neurons.push(L4Neuron {
                 solver,
                 state,

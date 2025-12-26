@@ -127,7 +127,7 @@ fn run_tick_nmda(
         neuron
             .solver
             .step_with_synapses(&mut neuron.state, &input, &syn_input);
-        let v = neuron.state.voltages[0];
+        let v = neuron.state.comp_v[0];
         if neuron.last_soma_v < THRESHOLD_MV && v >= THRESHOLD_MV {
             spikes.push(idx);
         }
@@ -203,7 +203,7 @@ fn nmda_determinism_matches_between_runs() {
             spikes.push(tick_spikes);
         }
 
-        let voltages: Vec<f32> = neurons.iter().map(|n| n.state.voltages[0]).collect();
+        let voltages: Vec<f32> = neurons.iter().map(|n| n.state.comp_v[0]).collect();
         (spikes, voltages, syn_states)
     };
 

@@ -20,27 +20,50 @@ pub struct CompartmentChannels {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct L4State {
-    pub voltages: Vec<f32>,
-    pub gates: Vec<GatingState>,
+    pub comp_v: Vec<f32>,
+    pub m_q: Vec<u16>,
+    pub h_q: Vec<u16>,
+    pub n_q: Vec<u16>,
     #[cfg(feature = "biophys-l4-ca")]
     pub p_ca_q: Vec<u16>,
 }
 
 impl L4State {
     pub fn new(initial_voltage: f32, compartment_count: usize) -> Self {
-        let voltages = vec![initial_voltage; compartment_count];
-        let gates = voltages
-            .iter()
-            .map(|&v| GatingState::from_voltage(v))
-            .collect();
+        let comp_v = vec![initial_voltage; compartment_count];
+        let mut m_q = Vec::with_capacity(compartment_count);
+        let mut h_q = Vec::with_capacity(compartment_count);
+        let mut n_q = Vec::with_capacity(compartment_count);
+        for &v in &comp_v {
+            let gates = GatingState::from_voltage(v);
+            m_q.push(gate_to_q(gates.m));
+            h_q.push(gate_to_q(gates.h));
+            n_q.push(gate_to_q(gates.n));
+        }
         #[cfg(feature = "biophys-l4-ca")]
-        let p_ca_q = voltages.iter().map(|&v| ca_p_inf_q(v)).collect();
+        let p_ca_q = comp_v.iter().map(|&v| ca_p_inf_q(v)).collect();
         Self {
-            voltages,
-            gates,
+            comp_v,
+            m_q,
+            h_q,
+            n_q,
             #[cfg(feature = "biophys-l4-ca")]
             p_ca_q,
         }
+    }
+
+    fn gates_at(&self, index: usize) -> GatingState {
+        GatingState {
+            m: gate_from_q(self.m_q[index]),
+            h: gate_from_q(self.h_q[index]),
+            n: gate_from_q(self.n_q[index]),
+        }
+    }
+
+    fn set_gates(&mut self, index: usize, gates: GatingState) {
+        self.m_q[index] = gate_to_q(gates.m);
+        self.h_q[index] = gate_to_q(gates.h);
+        self.n_q[index] = gate_to_q(gates.n);
     }
 }
 
@@ -64,7 +87,7 @@ pub struct L4Solver {
     clamp_min: f32,
     clamp_max: f32,
     #[cfg(feature = "biophys-l4-ca")]
-    max_depth: u32,
+    distal_mask: Vec<bool>,
     step_count: u64,
 }
 
@@ -157,12 +180,19 @@ impl L4Solver {
 
         let axial_currents = vec![0.0_f32; morphology.compartments.len()];
         #[cfg(feature = "biophys-l4-ca")]
-        let max_depth = morphology
-            .compartments
-            .iter()
-            .map(|compartment| compartment.depth)
-            .max()
-            .unwrap_or(0);
+        let distal_mask = {
+            let max_depth = morphology
+                .compartments
+                .iter()
+                .map(|compartment| compartment.depth)
+                .max()
+                .unwrap_or(0);
+            morphology
+                .compartments
+                .iter()
+                .map(|compartment| is_distal(compartment.depth, max_depth))
+                .collect()
+        };
 
         Ok(Self {
             morphology,
@@ -173,7 +203,7 @@ impl L4Solver {
             clamp_min,
             clamp_max,
             #[cfg(feature = "biophys-l4-ca")]
-            max_depth,
+            distal_mask,
             step_count: 0,
         })
     }
@@ -192,7 +222,7 @@ impl L4Solver {
 
     pub fn step_with_output(&mut self, state: &mut L4State, input_current: &[f32]) -> L4StepOutput {
         assert_eq!(
-            state.voltages.len(),
+            state.comp_v.len(),
             self.morphology.compartments.len(),
             "state voltage count must match compartments"
         );
@@ -202,8 +232,11 @@ impl L4Solver {
             "input current count must match compartments"
         );
 
-        for (v, gates) in state.voltages.iter().copied().zip(state.gates.iter_mut()) {
+        for idx in 0..state.comp_v.len() {
+            let v = state.comp_v[idx];
+            let mut gates = state.gates_at(idx);
             gates.update(v, self.dt_ms);
+            state.set_gates(idx, gates);
         }
 
         #[cfg(feature = "biophys-l4-ca")]
@@ -215,8 +248,8 @@ impl L4Solver {
         for (parent_index, children) in self.children_indices.iter().enumerate() {
             for &child_index in children {
                 let compartment = &self.morphology.compartments[child_index];
-                let v_child = state.voltages[child_index];
-                let v_parent = state.voltages[parent_index];
+                let v_child = state.comp_v[child_index];
+                let v_parent = state.comp_v[parent_index];
                 let resistance = compartment.axial_resistance.max(1e-6);
                 let current = (v_parent - v_child) / resistance;
                 self.axial_currents[child_index] += current;
@@ -226,15 +259,15 @@ impl L4Solver {
 
         for (index, compartment) in self.morphology.compartments.iter().enumerate() {
             let channels = self.channels[index];
-            let v = state.voltages[index];
-            let gates = state.gates[index];
+            let v = state.comp_v[index];
+            let gates = state.gates_at(index);
             let mut ionic = leak_current(channels.leak, v);
             if let Some(nak) = channels.nak {
                 ionic += nak_current(nak, gates, v);
             }
             #[cfg(feature = "biophys-l4-ca")]
             if let Some(ca) = channels.ca {
-                if is_distal(compartment.depth, self.max_depth) {
+                if self.distal_mask[index] {
                     let p_inf_q = ca_p_inf_q(v);
                     let current_q = state.p_ca_q[index] as i32;
                     let updated_q =
@@ -249,13 +282,13 @@ impl L4Solver {
             let dv = self.dt_ms * (ext + axial - ionic) / capacitance;
             let updated = (v + dv).clamp(self.clamp_min, self.clamp_max);
             #[cfg(feature = "biophys-l4-ca")]
-            if is_distal(compartment.depth, self.max_depth)
+            if self.distal_mask[index]
                 && v < CA_SPIKE_THRESHOLD_MV
                 && updated >= CA_SPIKE_THRESHOLD_MV
             {
                 ca_spike = true;
             }
-            state.voltages[index] = updated;
+            state.comp_v[index] = updated;
         }
 
         self.step_count = self.step_count.saturating_add(1);
@@ -287,7 +320,7 @@ impl L4Solver {
         synaptic: &[SynapseAccumulator],
     ) -> L4StepOutput {
         assert_eq!(
-            state.voltages.len(),
+            state.comp_v.len(),
             self.morphology.compartments.len(),
             "state voltage count must match compartments"
         );
@@ -302,8 +335,11 @@ impl L4Solver {
             "synaptic count must match compartments"
         );
 
-        for (v, gates) in state.voltages.iter().copied().zip(state.gates.iter_mut()) {
+        for idx in 0..state.comp_v.len() {
+            let v = state.comp_v[idx];
+            let mut gates = state.gates_at(idx);
             gates.update(v, self.dt_ms);
+            state.set_gates(idx, gates);
         }
 
         #[cfg(feature = "biophys-l4-ca")]
@@ -315,8 +351,8 @@ impl L4Solver {
         for (parent_index, children) in self.children_indices.iter().enumerate() {
             for &child_index in children {
                 let compartment = &self.morphology.compartments[child_index];
-                let v_child = state.voltages[child_index];
-                let v_parent = state.voltages[parent_index];
+                let v_child = state.comp_v[child_index];
+                let v_parent = state.comp_v[parent_index];
                 let resistance = compartment.axial_resistance.max(1e-6);
                 let current = (v_parent - v_child) / resistance;
                 self.axial_currents[child_index] += current;
@@ -326,15 +362,15 @@ impl L4Solver {
 
         for (index, compartment) in self.morphology.compartments.iter().enumerate() {
             let channels = self.channels[index];
-            let v = state.voltages[index];
-            let gates = state.gates[index];
+            let v = state.comp_v[index];
+            let gates = state.gates_at(index);
             let mut ionic = leak_current(channels.leak, v);
             if let Some(nak) = channels.nak {
                 ionic += nak_current(nak, gates, v);
             }
             #[cfg(feature = "biophys-l4-ca")]
             if let Some(ca) = channels.ca {
-                if is_distal(compartment.depth, self.max_depth) {
+                if self.distal_mask[index] {
                     let p_inf_q = ca_p_inf_q(v);
                     let current_q = state.p_ca_q[index] as i32;
                     let updated_q =
@@ -350,13 +386,13 @@ impl L4Solver {
             let dv = self.dt_ms * (ext + syn + axial - ionic) / capacitance;
             let updated = (v + dv).clamp(self.clamp_min, self.clamp_max);
             #[cfg(feature = "biophys-l4-ca")]
-            if is_distal(compartment.depth, self.max_depth)
+            if self.distal_mask[index]
                 && v < CA_SPIKE_THRESHOLD_MV
                 && updated >= CA_SPIKE_THRESHOLD_MV
             {
                 ca_spike = true;
             }
-            state.voltages[index] = updated;
+            state.comp_v[index] = updated;
         }
 
         self.step_count = self.step_count.saturating_add(1);
@@ -420,16 +456,17 @@ impl L4Solver {
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"UCF:L4:SNAP");
         update_u64(&mut hasher, self.step_count);
-        update_u32(&mut hasher, state.voltages.len() as u32);
-        for (v, gates) in state.voltages.iter().zip(state.gates.iter()) {
-            update_f32(&mut hasher, *v);
-            update_f32(&mut hasher, gates.m);
-            update_f32(&mut hasher, gates.h);
-            update_f32(&mut hasher, gates.n);
+        update_u32(&mut hasher, state.comp_v.len() as u32);
+        for idx in 0..state.comp_v.len() {
+            let v = state.comp_v[idx];
+            update_f32(&mut hasher, v);
+            update_u16(&mut hasher, state.m_q[idx]);
+            update_u16(&mut hasher, state.h_q[idx]);
+            update_u16(&mut hasher, state.n_q[idx]);
         }
         #[cfg(feature = "biophys-l4-ca")]
         for p_ca_q in &state.p_ca_q {
-            update_u32(&mut hasher, *p_ca_q as u32);
+            update_u16(&mut hasher, *p_ca_q);
         }
         *hasher.finalize().as_bytes()
     }
@@ -457,6 +494,20 @@ fn update_u64(hasher: &mut blake3::Hasher, value: u64) {
 
 fn update_f32(hasher: &mut blake3::Hasher, value: f32) {
     hasher.update(&value.to_bits().to_le_bytes());
+}
+
+fn update_u16(hasher: &mut blake3::Hasher, value: u16) {
+    hasher.update(&value.to_le_bytes());
+}
+
+const GATE_SCALE: f32 = 1000.0;
+
+fn gate_to_q(value: f32) -> u16 {
+    (value * GATE_SCALE).round().clamp(0.0, GATE_SCALE) as u16
+}
+
+fn gate_from_q(value: u16) -> f32 {
+    value as f32 / GATE_SCALE
 }
 
 #[cfg(feature = "biophys-l4-ca")]

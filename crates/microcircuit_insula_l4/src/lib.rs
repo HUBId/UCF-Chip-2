@@ -517,7 +517,7 @@ impl InsulaL4Microcircuit {
                 .solver
                 .step_with_synapses(&mut neuron.state, &input, syn_input);
             sanitize_voltages(&mut neuron.state);
-            let v = neuron.state.voltages[0];
+            let v = neuron.state.comp_v[0];
             if neuron.last_soma_v < THRESHOLD_MV && v >= THRESHOLD_MV {
                 spikes.push(idx);
             }
@@ -826,7 +826,7 @@ fn build_neuron(neuron_id: u32) -> L4Neuron {
 
     let solver = L4Solver::new(morphology, channels, DT_MS, CLAMP_MIN, CLAMP_MAX).expect("solver");
     let state = L4State::new(-65.0, COMPARTMENT_COUNT);
-    let last_soma_v = state.voltages[0];
+    let last_soma_v = state.comp_v[0];
 
     L4Neuron {
         solver,
@@ -1022,7 +1022,7 @@ fn build_pre_index(neuron_count: usize, synapses: &[SynapseL4]) -> Vec<Vec<usize
 }
 
 fn sanitize_voltages(state: &mut L4State) {
-    for v in &mut state.voltages {
+    for v in &mut state.comp_v {
         if !v.is_finite() {
             *v = CLAMP_MIN;
         } else {

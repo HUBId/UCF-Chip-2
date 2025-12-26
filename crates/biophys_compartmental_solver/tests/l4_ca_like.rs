@@ -72,7 +72,7 @@ fn run_simulation(injection: f32, steps: usize) -> (Vec<Vec<u16>>, Vec<bool>, Ve
     let mut spike_flags = Vec::with_capacity(steps);
 
     for _ in 0..steps {
-        let mut input = vec![0.0_f32; state.voltages.len()];
+        let mut input = vec![0.0_f32; state.comp_v.len()];
         for &index in &distal_indices {
             input[index] = injection;
         }
@@ -86,7 +86,7 @@ fn run_simulation(injection: f32, steps: usize) -> (Vec<Vec<u16>>, Vec<bool>, Ve
         spike_flags.push(output.ca_spike);
     }
 
-    (traces, spike_flags, state.voltages)
+    (traces, spike_flags, state.comp_v)
 }
 
 #[test]

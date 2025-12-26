@@ -18,7 +18,8 @@ pub trait BiophysCircuit<I: ?Sized, O> {
 #[derive(Debug, Clone)]
 pub struct BiophysRuntime {
     pub params: Vec<LifParams>,
-    pub states: Vec<LifState>,
+    pub v: Vec<i32>,
+    pub refractory: Vec<u16>,
     pub dt_ms: u16,
     pub step_count: u64,
     pub max_spikes_per_step: usize,
@@ -30,6 +31,9 @@ pub struct BiophysRuntime {
     pub max_events_per_step: usize,
     pub dropped_event_count: u64,
     counters: RuntimeCounters,
+    syn_inputs: Vec<i32>,
+    spike_list: Vec<NeuronId>,
+    spike_output: Vec<NeuronId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,17 +161,18 @@ fn deliver_events(
         return;
     }
     let bucket = (step_count as usize) % event_queue.len();
-    let mut events = std::mem::take(&mut event_queue[bucket]);
+    let events = &mut event_queue[bucket];
     counters.events_delivered = counters
         .events_delivered
         .saturating_add(events.len() as u64);
     events.sort_by_key(|event| (event.post.0, event.synapse_index));
-    for event in events {
+    for event in events.iter() {
         let post_idx = event.post.0 as usize;
         if post_idx < syn_inputs.len() {
             syn_inputs[post_idx] = syn_inputs[post_idx].saturating_add(event.current);
         }
     }
+    events.clear();
 }
 
 fn deliver_partitioned_events(
@@ -184,7 +189,7 @@ fn deliver_partitioned_events(
     for (partition_idx, partition) in partition_plan.partitions.iter().enumerate() {
         let buffer = &mut partition_input_buffers[partition_idx];
         buffer.fill(0);
-        let mut events = std::mem::take(&mut event_queue[bucket][partition_idx]);
+        let events = &mut event_queue[bucket][partition_idx];
         counters.events_delivered = counters
             .events_delivered
             .saturating_add(events.len() as u64);
@@ -192,12 +197,13 @@ fn deliver_partitioned_events(
             continue;
         }
         events.sort_by_key(|event| (event.post.0, event.synapse_index));
-        for event in events {
+        for event in events.iter() {
             let local_idx = (event.post.0 - partition.neuron_start) as usize;
             if local_idx < buffer.len() {
                 buffer[local_idx] = buffer[local_idx].saturating_add(event.current);
             }
         }
+        events.clear();
     }
 }
 
@@ -332,7 +338,8 @@ fn schedule_spikes_partitioned(
 struct PartitionStepContext<'a> {
     dt_ms: u16,
     params: &'a [LifParams],
-    states: &'a mut [LifState],
+    v: &'a mut [i32],
+    refractory: &'a mut [u16],
     inputs: &'a [i32],
     syn_inputs: &'a [i32],
     spike_buffer: &'a mut Vec<NeuronId>,
@@ -342,10 +349,17 @@ struct PartitionStepContext<'a> {
 
 fn step_partition(context: &mut PartitionStepContext<'_>) {
     context.spike_buffer.clear();
-    for idx in 0..context.states.len() {
+    for idx in 0..context.v.len() {
         let mut solver = LifSolver::new(context.params[idx], context.dt_ms);
         let total_input = context.inputs[idx].saturating_add(context.syn_inputs[idx]);
-        if solver.step(&mut context.states[idx], &total_input) {
+        let mut state = LifState {
+            v: context.v[idx],
+            refractory_steps: context.refractory[idx],
+        };
+        let did_spike = solver.step(&mut state, &total_input);
+        context.v[idx] = state.v;
+        context.refractory[idx] = state.refractory_steps;
+        if did_spike {
             context
                 .spike_buffer
                 .push(NeuronId(context.neuron_start + idx as u32));
@@ -388,20 +402,26 @@ impl BiophysRuntime {
             edges.is_empty() || edges.len() == stp_params.len(),
             "edges/stp_params mismatch"
         );
+        let neuron_count = params.len();
+        let (v, refractory) = split_states(states);
         let (edges, stp_params) = sort_synapses(edges, stp_params);
         let mut max_delay = 0u16;
         for edge in &edges {
             let pre_idx = edge.pre.0 as usize;
             let post_idx = edge.post.0 as usize;
-            assert!(pre_idx < states.len(), "edge pre out of range");
-            assert!(post_idx < states.len(), "edge post out of range");
+            assert!(pre_idx < v.len(), "edge pre out of range");
+            assert!(post_idx < v.len(), "edge post out of range");
             max_delay = max_delay.max(edge.delay_steps);
         }
-        let pre_index = CsrAdjacency::build(states.len(), &edges);
+        let pre_index = CsrAdjacency::build(neuron_count, &edges);
         let queue_len = max_delay as usize + 1;
+        let event_queue = (0..queue_len.max(1))
+            .map(|_| Vec::with_capacity(max_events_per_step))
+            .collect();
         Self {
             params,
-            states,
+            v,
+            refractory,
             dt_ms,
             step_count: 0,
             max_spikes_per_step,
@@ -409,10 +429,13 @@ impl BiophysRuntime {
             edges,
             stp_params,
             pre_index,
-            event_queue: vec![Vec::new(); queue_len.max(1)],
+            event_queue,
             max_events_per_step,
             dropped_event_count: 0,
             counters: RuntimeCounters::default(),
+            syn_inputs: vec![0i32; neuron_count],
+            spike_list: Vec::with_capacity(max_spikes_per_step),
+            spike_output: Vec::with_capacity(max_spikes_per_step),
         }
     }
 
@@ -421,7 +444,7 @@ impl BiophysRuntime {
     }
 
     pub fn step(&mut self, inputs: &[i32]) -> PopCode {
-        assert_eq!(inputs.len(), self.states.len(), "input length mismatch");
+        assert_eq!(inputs.len(), self.v.len(), "input length mismatch");
         self.counters.steps_executed = self.counters.steps_executed.saturating_add(1);
         let mods = self.current_modulators;
         if !self.edges.is_empty() {
@@ -433,28 +456,34 @@ impl BiophysRuntime {
             }
         }
 
-        let mut syn_inputs = vec![0i32; self.states.len()];
+        self.syn_inputs.fill(0);
         deliver_events(
             self.step_count,
             &mut self.event_queue,
-            &mut syn_inputs,
+            &mut self.syn_inputs,
             &mut self.counters,
         );
-        let mut spikes = Vec::new();
-        for (idx, (state, params)) in self.states.iter_mut().zip(self.params.iter()).enumerate() {
+        self.spike_list.clear();
+        for (idx, params) in self.params.iter().enumerate() {
             let mut solver = LifSolver::new(*params, self.dt_ms);
-            let total_input = inputs[idx].saturating_add(syn_inputs[idx]);
-            if solver.step(state, &total_input) {
-                spikes.push(NeuronId(idx as u32));
+            let total_input = inputs[idx].saturating_add(self.syn_inputs[idx]);
+            let mut state = LifState {
+                v: self.v[idx],
+                refractory_steps: self.refractory[idx],
+            };
+            if solver.step(&mut state, &total_input) {
+                self.spike_list.push(NeuronId(idx as u32));
             }
+            self.v[idx] = state.v;
+            self.refractory[idx] = state.refractory_steps;
         }
-        spikes.sort_by_key(|id| id.0);
-        let max_spikes = clamp_usize(spikes.len(), self.max_spikes_per_step);
-        spikes.truncate(max_spikes);
+        self.spike_list.sort_by_key(|id| id.0);
+        let max_spikes = clamp_usize(self.spike_list.len(), self.max_spikes_per_step);
+        self.spike_list.truncate(max_spikes);
         self.counters.spikes_total = self
             .counters
             .spikes_total
-            .saturating_add(spikes.len() as u64);
+            .saturating_add(self.spike_list.len() as u64);
 
         let mut schedule_context = ScheduleContext {
             pre_index: &self.pre_index,
@@ -466,9 +495,13 @@ impl BiophysRuntime {
             dropped_event_count: &mut self.dropped_event_count,
             counters: &mut self.counters,
         };
-        schedule_spikes(&spikes, self.step_count, &mut schedule_context);
+        schedule_spikes(&self.spike_list, self.step_count, &mut schedule_context);
         self.step_count = self.step_count.saturating_add(1);
-        PopCode { spikes }
+        self.spike_output.clear();
+        self.spike_output.extend_from_slice(&self.spike_list);
+        PopCode {
+            spikes: self.spike_output.clone(),
+        }
     }
 
     pub fn counters_snapshot(&self) -> RuntimeCounters {
@@ -509,10 +542,10 @@ impl BiophysRuntime {
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"UCF:BIO:SNAP");
         update_u64(&mut hasher, self.step_count);
-        update_u32(&mut hasher, self.states.len() as u32);
-        for state in &self.states {
-            update_i32(&mut hasher, state.v);
-            update_u16(&mut hasher, state.refractory_steps);
+        update_u32(&mut hasher, self.v.len() as u32);
+        for (v, refractory) in self.v.iter().zip(self.refractory.iter()) {
+            update_i32(&mut hasher, *v);
+            update_u16(&mut hasher, *refractory);
         }
         update_u32(&mut hasher, self.edges.len() as u32);
         for edge in &self.edges {
@@ -530,7 +563,8 @@ impl BiophysRuntime {
 #[derive(Debug, Clone)]
 pub struct PartitionedRuntime {
     pub params: Vec<LifParams>,
-    pub states: Vec<LifState>,
+    pub v: Vec<i32>,
+    pub refractory: Vec<u16>,
     pub dt_ms: u16,
     pub step_count: u64,
     pub max_spikes_per_step: usize,
@@ -547,6 +581,8 @@ pub struct PartitionedRuntime {
     partition_spike_buffers: Vec<Vec<NeuronId>>,
     partition_input_buffers: Vec<Vec<i32>>,
     partition_merge_order: Vec<usize>,
+    merged_spikes: Vec<NeuronId>,
+    merged_spikes_output: Vec<NeuronId>,
 }
 
 impl PartitionedRuntime {
@@ -585,22 +621,27 @@ impl PartitionedRuntime {
             synapses.edges.is_empty() || synapses.edges.len() == synapses.stp_params.len(),
             "edges/stp_params mismatch"
         );
+        let (v, refractory) = split_states(states);
         partition_plan
-            .validate(states.len() as u32)
+            .validate(v.len() as u32)
             .expect("invalid partition plan");
         let (edges, stp_params) = sort_synapses(synapses.edges, synapses.stp_params);
         let mut max_delay = 0u16;
         for edge in &edges {
             let pre_idx = edge.pre.0 as usize;
             let post_idx = edge.post.0 as usize;
-            assert!(pre_idx < states.len(), "edge pre out of range");
-            assert!(post_idx < states.len(), "edge post out of range");
+            assert!(pre_idx < v.len(), "edge pre out of range");
+            assert!(post_idx < v.len(), "edge post out of range");
             max_delay = max_delay.max(edge.delay_steps);
         }
-        let pre_index = CsrAdjacency::build(states.len(), &edges);
+        let pre_index = CsrAdjacency::build(v.len(), &edges);
         let queue_len = max_delay as usize + 1;
         let partition_count = partition_plan.partitions.len();
-        let partition_spike_buffers = vec![Vec::new(); partition_count];
+        let partition_spike_buffers = partition_plan
+            .partitions
+            .iter()
+            .map(|partition| Vec::with_capacity(partition.len() as usize))
+            .collect();
         let partition_input_buffers = partition_plan
             .partitions
             .iter()
@@ -608,15 +649,23 @@ impl PartitionedRuntime {
             .collect();
         let mut partition_merge_order: Vec<usize> = (0..partition_plan.partitions.len()).collect();
         partition_merge_order.sort_by_key(|idx| partition_plan.partitions[*idx].id);
-        let mut neuron_to_partition = vec![0usize; states.len()];
+        let mut neuron_to_partition = vec![0usize; v.len()];
         for (partition_idx, partition) in partition_plan.partitions.iter().enumerate() {
             for neuron in partition.neuron_start..partition.neuron_end {
                 neuron_to_partition[neuron as usize] = partition_idx;
             }
         }
+        let event_queue = (0..queue_len.max(1))
+            .map(|_| {
+                (0..partition_count)
+                    .map(|_| Vec::with_capacity(synapses.max_events_per_step))
+                    .collect()
+            })
+            .collect();
         Self {
             params,
-            states,
+            v,
+            refractory,
             dt_ms,
             step_count: 0,
             max_spikes_per_step,
@@ -624,7 +673,7 @@ impl PartitionedRuntime {
             edges,
             stp_params,
             pre_index,
-            event_queue: vec![vec![Vec::new(); partition_count]; queue_len.max(1)],
+            event_queue,
             max_events_per_step: synapses.max_events_per_step,
             dropped_event_count: 0,
             counters: RuntimeCounters::default(),
@@ -633,6 +682,8 @@ impl PartitionedRuntime {
             partition_spike_buffers,
             partition_input_buffers,
             partition_merge_order,
+            merged_spikes: Vec::with_capacity(max_spikes_per_step),
+            merged_spikes_output: Vec::with_capacity(max_spikes_per_step),
         }
     }
 
@@ -711,10 +762,10 @@ impl PartitionedRuntime {
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"UCF:BIO:SNAP");
         update_u64(&mut hasher, self.step_count);
-        update_u32(&mut hasher, self.states.len() as u32);
-        for state in &self.states {
-            update_i32(&mut hasher, state.v);
-            update_u16(&mut hasher, state.refractory_steps);
+        update_u32(&mut hasher, self.v.len() as u32);
+        for (v, refractory) in self.v.iter().zip(self.refractory.iter()) {
+            update_i32(&mut hasher, *v);
+            update_u16(&mut hasher, *refractory);
         }
         update_u32(&mut hasher, self.edges.len() as u32);
         for edge in &self.edges {
@@ -729,7 +780,7 @@ impl PartitionedRuntime {
     }
 
     fn step_inner(&mut self, inputs: &[i32], parallel: bool) -> PopCode {
-        assert_eq!(inputs.len(), self.states.len(), "input length mismatch");
+        assert_eq!(inputs.len(), self.v.len(), "input length mismatch");
         self.counters.steps_executed = self.counters.steps_executed.saturating_add(1);
         let mods = self.current_modulators;
         if !self.edges.is_empty() {
@@ -761,17 +812,22 @@ impl PartitionedRuntime {
             self.step_partitions_serial(inputs);
         }
 
-        let mut merged_spikes = Vec::new();
+        self.merged_spikes.clear();
         for &partition_idx in &self.partition_merge_order {
-            merged_spikes.extend_from_slice(&self.partition_spike_buffers[partition_idx]);
+            for spike in &self.partition_spike_buffers[partition_idx] {
+                if self.merged_spikes.len() >= self.max_spikes_per_step {
+                    break;
+                }
+                self.merged_spikes.push(*spike);
+            }
         }
-        merged_spikes.sort_by_key(|id| id.0);
-        let max_spikes = clamp_usize(merged_spikes.len(), self.max_spikes_per_step);
-        merged_spikes.truncate(max_spikes);
+        self.merged_spikes.sort_by_key(|id| id.0);
+        let max_spikes = clamp_usize(self.merged_spikes.len(), self.max_spikes_per_step);
+        self.merged_spikes.truncate(max_spikes);
         self.counters.spikes_total = self
             .counters
             .spikes_total
-            .saturating_add(merged_spikes.len() as u64);
+            .saturating_add(self.merged_spikes.len() as u64);
 
         let mut schedule_context = PartitionedScheduleContext {
             pre_index: &self.pre_index,
@@ -784,10 +840,13 @@ impl PartitionedRuntime {
             dropped_event_count: &mut self.dropped_event_count,
             counters: &mut self.counters,
         };
-        schedule_spikes_partitioned(&merged_spikes, self.step_count, &mut schedule_context);
+        schedule_spikes_partitioned(&self.merged_spikes, self.step_count, &mut schedule_context);
         self.step_count = self.step_count.saturating_add(1);
+        self.merged_spikes_output.clear();
+        self.merged_spikes_output
+            .extend_from_slice(&self.merged_spikes);
         PopCode {
-            spikes: merged_spikes,
+            spikes: self.merged_spikes_output.clone(),
         }
     }
 
@@ -796,14 +855,16 @@ impl PartitionedRuntime {
             let start = partition.neuron_start as usize;
             let end = partition.neuron_end as usize;
             let params = &self.params[start..end];
-            let states = &mut self.states[start..end];
+            let v = &mut self.v[start..end];
+            let refractory = &mut self.refractory[start..end];
             let inputs = &inputs[start..end];
             let syn_inputs = &self.partition_input_buffers[partition_idx];
             let buffer = &mut self.partition_spike_buffers[partition_idx];
             let mut context = PartitionStepContext {
                 dt_ms: self.dt_ms,
                 params,
-                states,
+                v,
+                refractory,
                 inputs,
                 syn_inputs,
                 spike_buffer: buffer,
@@ -818,7 +879,8 @@ impl PartitionedRuntime {
     fn step_partitions_parallel(&mut self, inputs: &[i32]) {
         let mut offset = 0usize;
         let mut params_slice = self.params.as_slice();
-        let mut states_slice = self.states.as_mut_slice();
+        let mut v_slice = self.v.as_mut_slice();
+        let mut refractory_slice = self.refractory.as_mut_slice();
         let mut inputs_slice = inputs;
         let mut syn_inputs_slice = self.partition_input_buffers.as_slice();
         let mut spike_buffers_slice = self.partition_spike_buffers.as_mut_slice();
@@ -829,7 +891,9 @@ impl PartitionedRuntime {
                 let start = partition.neuron_start as usize;
                 assert_eq!(start, offset, "partition order mismatch");
                 let (params_chunk, params_rest) = params_slice.split_at(partition_len);
-                let (states_chunk, states_rest) = states_slice.split_at_mut(partition_len);
+                let (v_chunk, v_rest) = v_slice.split_at_mut(partition_len);
+                let (refractory_chunk, refractory_rest) =
+                    refractory_slice.split_at_mut(partition_len);
                 let (inputs_chunk, inputs_rest) = inputs_slice.split_at(partition_len);
                 let (syn_inputs_chunk, syn_inputs_rest) = syn_inputs_slice.split_at(1);
                 let (spike_buffer_chunk, spike_buffer_rest) = spike_buffers_slice.split_at_mut(1);
@@ -844,7 +908,8 @@ impl PartitionedRuntime {
                     let mut context = PartitionStepContext {
                         dt_ms,
                         params: params_chunk,
-                        states: states_chunk,
+                        v: v_chunk,
+                        refractory: refractory_chunk,
                         inputs: inputs_chunk,
                         syn_inputs: syn_inputs_chunk,
                         spike_buffer: spike_buffer_chunk,
@@ -856,7 +921,8 @@ impl PartitionedRuntime {
 
                 offset = offset.saturating_add(partition_len);
                 params_slice = params_rest;
-                states_slice = states_rest;
+                v_slice = v_rest;
+                refractory_slice = refractory_rest;
                 inputs_slice = inputs_rest;
                 syn_inputs_slice = syn_inputs_rest;
                 spike_buffers_slice = spike_buffer_rest;
@@ -887,6 +953,16 @@ impl BiophysCircuit<[i32], PopCode> for PartitionedRuntime {
 
 fn update_u16(hasher: &mut blake3::Hasher, value: u16) {
     hasher.update(&value.to_le_bytes());
+}
+
+fn split_states(states: Vec<LifState>) -> (Vec<i32>, Vec<u16>) {
+    let mut v = Vec::with_capacity(states.len());
+    let mut refractory = Vec::with_capacity(states.len());
+    for state in states {
+        v.push(state.v);
+        refractory.push(state.refractory_steps);
+    }
+    (v, refractory)
 }
 
 fn sort_synapses(

@@ -57,14 +57,14 @@ fn multi_compartment_determinism_and_stability() {
         solver.step(&mut state, &input);
     }
 
-    for v in &state.voltages {
+    for v in &state.comp_v {
         assert!(v.is_finite());
         assert!(*v >= CLAMP_MIN && *v <= CLAMP_MAX);
     }
 
     let snapshot_a = solver.snapshot_digest(&state);
     let config_a = solver.config_digest();
-    let compartment_count = state.voltages.len();
+    let compartment_count = state.comp_v.len();
 
     let mut solver_b =
         L4Solver::new(morphology, channels, DT_MS, CLAMP_MIN, CLAMP_MAX).expect("solver");

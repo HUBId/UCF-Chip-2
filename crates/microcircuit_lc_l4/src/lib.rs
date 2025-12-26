@@ -165,7 +165,7 @@ impl LcMicrocircuit {
         for _ in 0..SUBSTEPS {
             neuron.solver.step(&mut neuron.state, currents);
             sanitize_voltages(&mut neuron.state);
-            let v = neuron.state.voltages[0];
+            let v = neuron.state.comp_v[0];
             if prev_v < THRESHOLD_MV && v >= THRESHOLD_MV {
                 spikes += 1;
             }
@@ -226,12 +226,12 @@ impl MicrocircuitBackend<LcInput, LcOutput> for LcMicrocircuit {
         hasher.update(&self.state.tick_count.to_le_bytes());
         for neuron in &self.neurons {
             update_u64(&mut hasher, neuron.solver.step_count());
-            update_u32(&mut hasher, neuron.state.voltages.len() as u32);
-            for (v, gates) in neuron.state.voltages.iter().zip(neuron.state.gates.iter()) {
-                update_f32(&mut hasher, *v);
-                update_f32(&mut hasher, gates.m);
-                update_f32(&mut hasher, gates.h);
-                update_f32(&mut hasher, gates.n);
+            update_u32(&mut hasher, neuron.state.comp_v.len() as u32);
+            for idx in 0..neuron.state.comp_v.len() {
+                update_f32(&mut hasher, neuron.state.comp_v[idx]);
+                update_f32(&mut hasher, neuron.state.m_q[idx] as f32 / 1000.0);
+                update_f32(&mut hasher, neuron.state.h_q[idx] as f32 / 1000.0);
+                update_f32(&mut hasher, neuron.state.n_q[idx] as f32 / 1000.0);
             }
         }
         *hasher.finalize().as_bytes()
@@ -315,7 +315,7 @@ fn build_neuron(neuron_id: u32) -> L4Neuron {
 
     let solver = L4Solver::new(morphology, channels, DT_MS, CLAMP_MIN, CLAMP_MAX).expect("solver");
     let state = L4State::new(-65.0, COMPARTMENT_COUNT);
-    let last_soma_v = state.voltages[0];
+    let last_soma_v = state.comp_v[0];
 
     L4Neuron {
         solver,
@@ -325,7 +325,7 @@ fn build_neuron(neuron_id: u32) -> L4Neuron {
 }
 
 fn sanitize_voltages(state: &mut L4State) {
-    for v in &mut state.voltages {
+    for v in &mut state.comp_v {
         if !v.is_finite() {
             *v = CLAMP_MIN;
         } else {

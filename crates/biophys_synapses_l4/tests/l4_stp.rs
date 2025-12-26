@@ -148,7 +148,7 @@ fn run_tick_stp(
         neuron
             .solver
             .step_with_synapses(&mut neuron.state, &input, &syn_input);
-        let v = neuron.state.voltages[0];
+        let v = neuron.state.comp_v[0];
         if neuron.last_soma_v < THRESHOLD_MV && v >= THRESHOLD_MV {
             spikes.push(idx);
         }

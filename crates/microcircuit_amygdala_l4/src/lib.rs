@@ -589,7 +589,7 @@ impl AmygdalaL4Microcircuit {
                 .solver
                 .step_with_synapses(&mut neuron.state, &input, syn_input);
             sanitize_voltages(&mut neuron.state);
-            let v = neuron.state.voltages[0];
+            let v = neuron.state.comp_v[0];
             if neuron.last_soma_v < THRESHOLD_MV && v >= THRESHOLD_MV {
                 spikes.push(idx);
             }
@@ -768,12 +768,12 @@ impl MicrocircuitBackend<AmyInput, AmyOutput> for AmygdalaL4Microcircuit {
         }
         for neuron in &self.neurons {
             update_u64(&mut hasher, neuron.solver.step_count());
-            update_u32(&mut hasher, neuron.state.voltages.len() as u32);
-            for (v, gates) in neuron.state.voltages.iter().zip(neuron.state.gates.iter()) {
-                update_i32(&mut hasher, quantize_f32(*v, 100.0));
-                update_i32(&mut hasher, quantize_f32(gates.m, 1000.0));
-                update_i32(&mut hasher, quantize_f32(gates.h, 1000.0));
-                update_i32(&mut hasher, quantize_f32(gates.n, 1000.0));
+            update_u32(&mut hasher, neuron.state.comp_v.len() as u32);
+            for idx in 0..neuron.state.comp_v.len() {
+                update_i32(&mut hasher, quantize_f32(neuron.state.comp_v[idx], 100.0));
+                update_i32(&mut hasher, neuron.state.m_q[idx] as i32);
+                update_i32(&mut hasher, neuron.state.h_q[idx] as i32);
+                update_i32(&mut hasher, neuron.state.n_q[idx] as i32);
             }
         }
         for state in &self.syn_states {
@@ -893,7 +893,7 @@ fn build_neuron(neuron_id: u32) -> L4Neuron {
 
     let solver = L4Solver::new(morphology, channels, DT_MS, CLAMP_MIN, CLAMP_MAX).expect("solver");
     let state = L4State::new(-65.0, COMPARTMENT_COUNT);
-    let last_soma_v = state.voltages[0];
+    let last_soma_v = state.comp_v[0];
 
     L4Neuron {
         solver,
@@ -1390,7 +1390,7 @@ impl CircuitBuilderFromAssets for AmygdalaL4Microcircuit {
                 message: format!("solver init failed: {error:?}"),
             })?;
             let state = L4State::new(-65.0, morphology.compartments.len());
-            let last_soma_v = state.voltages[0];
+            let last_soma_v = state.comp_v[0];
             neurons.push(L4Neuron {
                 solver,
                 state,
@@ -1512,7 +1512,7 @@ fn build_pre_index(neuron_count: usize, synapses: &[SynapseL4]) -> Vec<Vec<usize
 }
 
 fn sanitize_voltages(state: &mut L4State) {
-    for v in &mut state.voltages {
+    for v in &mut state.comp_v {
         if !v.is_finite() {
             *v = CLAMP_MIN;
         } else {
