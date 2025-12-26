@@ -1,8 +1,12 @@
 #![cfg(feature = "biophys-trace")]
 
-use biophys_assets::{demo_channel_params, demo_connectivity, demo_morphology_3comp, demo_syn_params};
+use biophys_assets::{
+    demo_channel_params, demo_connectivity, demo_morphology_3comp, demo_syn_params,
+};
 use biophys_core::{ModLevel, ModulatorField};
-use biophys_trace::sn_l4::{build_sn_trace_step, mod_level_to_level_class, SnL4TraceInit, SnTraceInput};
+use biophys_trace::sn_l4::{
+    build_sn_trace_step, mod_level_to_level_class, SnL4TraceInit, SnTraceInput,
+};
 use biophys_trace::{read_trace, run_trace, write_trace, LearningContext, TraceFile, TraceHeader};
 use microcircuit_core::MicrocircuitBackend;
 

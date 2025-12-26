@@ -370,11 +370,7 @@ fn read_vec(bytes: &[u8], cursor: &mut usize, len: usize) -> Result<Vec<u8>, Tra
     Ok(slice.to_vec())
 }
 
-fn read_slice<'a>(
-    bytes: &'a [u8],
-    cursor: &mut usize,
-    len: usize,
-) -> Result<&'a [u8], TraceError> {
+fn read_slice<'a>(bytes: &'a [u8], cursor: &mut usize, len: usize) -> Result<&'a [u8], TraceError> {
     let end = cursor
         .checked_add(len)
         .ok_or_else(|| TraceError::InvalidFormat {

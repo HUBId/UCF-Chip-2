@@ -458,7 +458,12 @@ impl SnL4Microcircuit {
 
         self.state.last_spike_count_total = spike_counts.iter().sum();
         self.state.last_pool_spikes = pool_counts;
-        for (slot, count) in self.state.last_spike_counts.iter_mut().zip(spike_counts.iter()) {
+        for (slot, count) in self
+            .state
+            .last_spike_counts
+            .iter_mut()
+            .zip(spike_counts.iter())
+        {
             *slot = (*count).min(u16::MAX as usize) as u16;
         }
 
