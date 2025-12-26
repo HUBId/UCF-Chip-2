@@ -95,7 +95,7 @@ impl<'a> ChunkStream<'a> {
             },
             Compression::Zstd => ChunkReader::Zstd {
                 decoder: zstd::stream::Decoder::new(std::io::Cursor::new(chunk.payload.as_slice()))
-                    .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?,
+                    .map_err(std::io::Error::other)?,
             },
             Compression::Unknown => {
                 return Err(std::io::Error::new(
