@@ -275,6 +275,13 @@ mod tests {
         ) -> Result<ucf::v1::PvgsReceipt, pvgs_client::PvgsError> {
             Ok(ucf::v1::PvgsReceipt::default())
         }
+
+        fn commit_trace_run_evidence(
+            &mut self,
+            _evidence: pvgs_client::TraceRunEvidenceLike,
+        ) -> Result<ucf::v1::PvgsReceipt, pvgs_client::PvgsError> {
+            Ok(ucf::v1::PvgsReceipt::default())
+        }
     }
 
     fn build_assets() -> BiophysAssets {

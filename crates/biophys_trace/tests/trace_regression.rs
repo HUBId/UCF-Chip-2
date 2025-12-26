@@ -11,9 +11,11 @@ use biophys_trace::sn_l4::{
 };
 use biophys_trace::{read_trace, run_trace, write_trace, LearningContext, TraceFile, TraceHeader};
 use microcircuit_core::MicrocircuitBackend;
+use pvgs_client::{MockPvgsWriter, PvgsWriter, TraceRunEvidenceLike, TraceRunStatus};
 
 const NEURON_COUNT: u32 = 14;
 const MAX_TRACE_BYTES: u64 = 2 * 1024 * 1024;
+const TRACE_ID: &str = "sn_small_v1";
 const EXPECTED_RUN_DIGEST: [u8; 32] = [
     0xe1, 0xac, 0x79, 0xd9, 0x8e, 0x04, 0x35, 0x9e, 0x7a, 0x04, 0x47, 0x76, 0xb5, 0x06, 0x54, 0x9f,
     0x0e, 0xf3, 0x69, 0x55, 0x70, 0x1c, 0x09, 0x62, 0xd2, 0x9b, 0xdc, 0x1a, 0xfc, 0x39, 0x9a, 0x7a,
@@ -109,4 +111,25 @@ fn trace_vector_matches_expected_digest() {
     let read_back = read_trace(&path).expect("read trace");
     let result = run_trace(&read_back, init).expect("run trace");
     assert_eq!(result.run_digest, EXPECTED_RUN_DIGEST);
+
+    let mut writer = MockPvgsWriter::default();
+    let evidence = TraceRunEvidenceLike {
+        trace_id: TRACE_ID.to_string(),
+        trace_run_digest: result.run_digest,
+        asset_manifest_digest: read_back.header.asset_manifest_digest,
+        circuit_config_digest: read_back.header.circuit_config_digest,
+        steps: read_back.header.steps,
+        status: TraceRunStatus::Pass,
+        created_at_ms: 0,
+        reason_codes: vec!["RC.GV.TRACE.PASS".to_string()],
+    };
+
+    writer
+        .commit_trace_run_evidence(evidence.clone())
+        .expect("commit trace run");
+    writer
+        .commit_trace_run_evidence(evidence)
+        .expect("commit trace run");
+
+    assert_eq!(writer.committed_trace_runs.len(), 1);
 }

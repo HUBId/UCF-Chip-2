@@ -1,6 +1,6 @@
 #![cfg(any(test, feature = "local-pvgs"))]
 
-use crate::{PvgsError, PvgsReader, PvgsWriter};
+use crate::{PvgsError, PvgsReader, PvgsWriter, TraceRunEvidenceLike};
 use chip4::pvgs::{
     AssetBundleAppend, AssetBundleCommit, AssetBundleQuery, AssetManifestAppend,
     AssetManifestCommit, CbvQuery, Digest32, MicrocircuitConfigCommit, PevQuery,
@@ -116,6 +116,13 @@ impl<C: MicrocircuitConfigCommit> PvgsWriter for LocalPvgsWriter<C> {
     ) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }
+
+    fn commit_trace_run_evidence(
+        &mut self,
+        _evidence: TraceRunEvidenceLike,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
 }
 
 #[derive(Clone)]
@@ -158,6 +165,13 @@ impl<C: AssetManifestCommit> PvgsWriter for LocalAssetManifestWriter<C> {
     fn commit_replay_run_evidence(
         &mut self,
         _evidence: ReplayRunEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_trace_run_evidence(
+        &mut self,
+        _evidence: TraceRunEvidenceLike,
     ) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }
@@ -206,6 +220,13 @@ impl<C: AssetBundleCommit> PvgsWriter for LocalAssetBundleWriter<C> {
     fn commit_replay_run_evidence(
         &mut self,
         _evidence: ReplayRunEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_trace_run_evidence(
+        &mut self,
+        _evidence: TraceRunEvidenceLike,
     ) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }

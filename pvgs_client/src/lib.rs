@@ -26,6 +26,60 @@ pub struct PvgsSnapshot {
     pub payload: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TraceRunStatus {
+    Pass = 1,
+    Fail = 2,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceRunEvidenceLike {
+    pub trace_id: String,
+    pub trace_run_digest: [u8; 32],
+    pub asset_manifest_digest: [u8; 32],
+    pub circuit_config_digest: [u8; 32],
+    pub steps: u32,
+    pub status: TraceRunStatus,
+    pub created_at_ms: u64,
+    pub reason_codes: Vec<String>,
+}
+
+const MAX_TRACE_ID_BYTES: usize = 256;
+const MAX_REASON_CODES: usize = 16;
+const MAX_REASON_CODE_BYTES: usize = 128;
+
+pub fn encode_trace_run_evidence(ev: &TraceRunEvidenceLike) -> Vec<u8> {
+    let mut out = Vec::new();
+    let trace_id_bytes = bounded_bytes(ev.trace_id.as_bytes(), MAX_TRACE_ID_BYTES);
+    out.extend_from_slice(&(trace_id_bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(trace_id_bytes);
+    out.extend_from_slice(&ev.trace_run_digest);
+    out.extend_from_slice(&ev.asset_manifest_digest);
+    out.extend_from_slice(&ev.circuit_config_digest);
+    out.extend_from_slice(&ev.steps.to_le_bytes());
+    out.push(ev.status as u8);
+    out.extend_from_slice(&ev.created_at_ms.to_le_bytes());
+
+    let reason_codes: Vec<&String> = ev.reason_codes.iter().take(MAX_REASON_CODES).collect();
+    out.extend_from_slice(&(reason_codes.len() as u32).to_le_bytes());
+    for code in reason_codes {
+        let code_bytes = bounded_bytes(code.as_bytes(), MAX_REASON_CODE_BYTES);
+        out.extend_from_slice(&(code_bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(code_bytes);
+    }
+
+    out
+}
+
+fn bounded_bytes(bytes: &[u8], max_len: usize) -> &[u8] {
+    if bytes.len() <= max_len {
+        bytes
+    } else {
+        &bytes[..max_len]
+    }
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PvgsError {
     #[error("PVGS fetch is not implemented")]
@@ -113,6 +167,11 @@ pub trait PvgsWriter: Send {
     fn commit_replay_run_evidence(
         &mut self,
         evidence: ReplayRunEvidence,
+    ) -> Result<PvgsReceipt, PvgsError>;
+
+    fn commit_trace_run_evidence(
+        &mut self,
+        evidence: TraceRunEvidenceLike,
     ) -> Result<PvgsReceipt, PvgsError>;
 }
 
@@ -251,6 +310,8 @@ pub struct MockPvgsWriter {
     pub committed_asset_bundles: Vec<AssetBundle>,
     pub committed_replay_runs: Vec<ReplayRunEvidence>,
     pub committed_replay_run_digests: HashSet<[u8; 32]>,
+    pub committed_trace_runs: Vec<TraceRunEvidenceLike>,
+    pub committed_trace_run_keys: HashSet<(String, [u8; 32])>,
     pub fail_with: Option<String>,
 }
 
@@ -263,6 +324,8 @@ impl MockPvgsWriter {
             committed_asset_bundles: Vec::new(),
             committed_replay_runs: Vec::new(),
             committed_replay_run_digests: HashSet::new(),
+            committed_trace_runs: Vec::new(),
+            committed_trace_run_keys: HashSet::new(),
             fail_with: Some(reason.into()),
         }
     }
@@ -340,6 +403,25 @@ impl PvgsWriter for MockPvgsWriter {
         self.committed_replay_runs.push(evidence);
         Ok(PvgsReceipt::default())
     }
+
+    fn commit_trace_run_evidence(
+        &mut self,
+        evidence: TraceRunEvidenceLike,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        if let Some(reason) = &self.fail_with {
+            return Err(PvgsError::CommitFailed {
+                reason: reason.clone(),
+            });
+        }
+
+        let key = (evidence.trace_id.clone(), evidence.trace_run_digest);
+        if !self.committed_trace_run_keys.insert(key) {
+            return Ok(PvgsReceipt::default());
+        }
+
+        self.committed_trace_runs.push(evidence);
+        Ok(PvgsReceipt::default())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -393,6 +475,13 @@ impl PvgsWriter for PlaceholderPvgsClient {
     fn commit_replay_run_evidence(
         &mut self,
         _evidence: ReplayRunEvidence,
+    ) -> Result<PvgsReceipt, PvgsError> {
+        Err(PvgsError::NotImplemented)
+    }
+
+    fn commit_trace_run_evidence(
+        &mut self,
+        _evidence: TraceRunEvidenceLike,
     ) -> Result<PvgsReceipt, PvgsError> {
         Err(PvgsError::NotImplemented)
     }
@@ -527,6 +616,25 @@ mod tests {
         writer.commit_replay_run_evidence(evidence).unwrap();
 
         assert_eq!(writer.committed_replay_runs.len(), 1);
+    }
+
+    #[test]
+    fn trace_run_evidence_encoding_is_deterministic() {
+        let ev = TraceRunEvidenceLike {
+            trace_id: "trace:unit-test".to_string(),
+            trace_run_digest: [1u8; 32],
+            asset_manifest_digest: [2u8; 32],
+            circuit_config_digest: [3u8; 32],
+            steps: 42,
+            status: TraceRunStatus::Pass,
+            created_at_ms: 1234,
+            reason_codes: vec!["RC.GV.TRACE.PASS".to_string()],
+        };
+
+        let payload_a = encode_trace_run_evidence(&ev);
+        let payload_b = encode_trace_run_evidence(&ev);
+
+        assert_eq!(payload_a, payload_b);
     }
 
     #[test]
