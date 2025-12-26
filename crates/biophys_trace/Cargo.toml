@@ -1,0 +1,26 @@
+[package]
+name = "biophys_trace"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+biophys-trace = [
+    "dep:microcircuit_sn_l4",
+    "dep:microcircuit_sn_stub",
+    "dep:dbm_core",
+    "dep:biophys_assets",
+    "dep:biophys_asset_builder",
+]
+
+[dependencies]
+blake3 = "1"
+thiserror = { workspace = true }
+biophys_core = { path = "../biophys_core" }
+microcircuit_core = { path = "../microcircuit_core" }
+
+microcircuit_sn_l4 = { path = "../microcircuit_sn_l4", optional = true, features = ["biophys-l4", "biophys-l4-synapses", "biophys-l4-sn-assets"] }
+microcircuit_sn_stub = { path = "../microcircuit_sn_stub", optional = true }
+dbm_core = { path = "../dbm_core", optional = true }
+biophys_assets = { path = "../biophys_assets", optional = true }
+biophys_asset_builder = { path = "../biophys_asset_builder", optional = true }

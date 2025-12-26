@@ -83,6 +83,7 @@ members = [
     "crates/biophys_plasticity_l4",
     "crates/biophys_homeostasis_l4",
     "crates/biophys_targeting_l4",
+    "crates/biophys_trace",
     "crates/replay_executor",
     "crates/replay_evidence",
 ]

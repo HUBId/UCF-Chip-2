@@ -119,6 +119,7 @@ struct SnL4State {
     pool_acc: [i32; POOL_COUNT],
     last_pool_spikes: [usize; POOL_COUNT],
     last_spike_count_total: usize,
+    last_spike_counts: [u16; NEURON_COUNT],
     winner: usize,
     hysteresis_count: u8,
     pending_winner: Option<usize>,
@@ -137,6 +138,7 @@ impl Default for SnL4State {
             pool_acc: [0; POOL_COUNT],
             last_pool_spikes: [0; POOL_COUNT],
             last_spike_count_total: 0,
+            last_spike_counts: [0; NEURON_COUNT],
             winner: IDX_EXEC_PLAN,
             hysteresis_count: 0,
             pending_winner: None,
@@ -400,6 +402,14 @@ impl SnL4Microcircuit {
         }
     }
 
+    pub fn last_spike_counts(&self) -> &[u16; NEURON_COUNT] {
+        &self.state.last_spike_counts
+    }
+
+    pub fn pool_accumulators(&self) -> &[i32; POOL_COUNT] {
+        &self.state.pool_acc
+    }
+
     fn pool_for_mode(mode: DwmMode) -> usize {
         match mode {
             DwmMode::ExecPlan => IDX_EXEC_PLAN,
@@ -448,6 +458,9 @@ impl SnL4Microcircuit {
 
         self.state.last_spike_count_total = spike_counts.iter().sum();
         self.state.last_pool_spikes = pool_counts;
+        for (slot, count) in self.state.last_spike_counts.iter_mut().zip(spike_counts.iter()) {
+            *slot = (*count).min(u16::MAX as usize) as u16;
+        }
 
         for (acc, &count) in self.state.pool_acc.iter_mut().zip(pool_counts.iter()) {
             let delta = (count as i32).saturating_mul(ACCUMULATOR_GAIN);

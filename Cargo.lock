@@ -175,6 +175,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "biophys_trace"
+version = "0.1.0"
+dependencies = [
+ "biophys_asset_builder",
+ "biophys_assets",
+ "biophys_core",
+ "blake3",
+ "dbm_core",
+ "microcircuit_core",
+ "microcircuit_sn_l4",
+ "microcircuit_sn_stub",
+ "thiserror",
+]
+
+[[package]]
 name = "blake3"
 version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
