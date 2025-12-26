@@ -30,7 +30,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cargo test (microcircuit)
-        run: cargo test --features microcircuit-sn-attractor,microcircuit-lc-spike,microcircuit-serotonin-attractor,microcircuit-dopamin-attractor,microcircuit-amygdala-pop,microcircuit-pag-attractor,microcircuit-stn-hold,microcircuit-pmrf-rhythm,microcircuit-sc-attractor,microcircuit-pprf-lock,microcircuit-cerebellum-pop,microcircuit-insula-fusion,microcircuit-hypothalamus-setpoint
+        run: cargo test --features microcircuit-sn-attractor,microcircuit-lc-spike,microcircuit-serotonin-attractor,microcircuit-dopamin-attractor,microcircuit-amygdala-pop,microcircuit-pag-attractor,microcircuit-stn-hold,microcircuit-pmrf-rhythm,microcircuit-sc-attractor,microcircuit-cerebellum-pop,microcircuit-insula-fusion,microcircuit-hypothalamus-setpoint
 
   biophys-l4-full:
     runs-on: ubuntu-latest

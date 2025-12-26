@@ -42,7 +42,6 @@ select each profile, and the evidence emitted for reproducibility.
 - `microcircuit-stn-hold`
 - `microcircuit-pmrf-rhythm`
 - `microcircuit-sc-attractor`
-- `microcircuit-pprf-lock`
 - `microcircuit-cerebellum-pop`
 - `microcircuit-insula-fusion`
 - `microcircuit-hypothalamus-setpoint`
