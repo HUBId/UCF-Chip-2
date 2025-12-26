@@ -20,6 +20,10 @@ impl Partition {
     pub fn len(&self) -> u32 {
         self.neuron_end.saturating_sub(self.neuron_start)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.neuron_start >= self.neuron_end
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
