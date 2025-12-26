@@ -141,7 +141,20 @@ fn tick_outputs_stable_and_reason_codes_sorted() {
         .all(|pair| pair[0] <= pair[1]));
     assert!(output_a.reason_codes.len() <= ReasonSet::DEFAULT_MAX_LEN);
 
-    let expected = if cfg!(feature = "biophys-stn") || cfg!(feature = "biophys-l4-insula") {
+    let expected = if cfg!(feature = "microcircuit-serotonin-attractor")
+        || cfg!(feature = "microcircuit-insula-fusion")
+    {
+        vec![
+            "RC.GV.DIVERGENCE.HIGH".to_string(),
+            "RC.GV.DWM.REPORT".to_string(),
+            "RC.GV.FOCUS_SHIFT.EXECUTED".to_string(),
+            "RC.GV.HOLD.ON".to_string(),
+            "RC.GV.ORIENT.TARGET_INTEGRITY".to_string(),
+            "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
+            "RC.GV.SEQUENCE.SPLIT_REQUIRED".to_string(),
+            "RC.RE.INTEGRITY.DEGRADED/FAIL".to_string(),
+        ]
+    } else if cfg!(feature = "biophys-stn") || cfg!(feature = "biophys-l4-insula") {
         vec![
             "RC.GV.DIVERGENCE.HIGH".to_string(),
             "RC.GV.DWM.REPORT".to_string(),

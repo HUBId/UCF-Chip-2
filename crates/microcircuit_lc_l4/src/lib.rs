@@ -308,9 +308,21 @@ fn build_neuron(neuron_id: u32) -> L4Neuron {
         CompartmentChannels {
             leak,
             nak: Some(nak),
+            #[cfg(feature = "biophys-l4-ca")]
+            ca: None,
         },
-        CompartmentChannels { leak, nak: None },
-        CompartmentChannels { leak, nak: None },
+        CompartmentChannels {
+            leak,
+            nak: None,
+            #[cfg(feature = "biophys-l4-ca")]
+            ca: None,
+        },
+        CompartmentChannels {
+            leak,
+            nak: None,
+            #[cfg(feature = "biophys-l4-ca")]
+            ca: None,
+        },
     ];
 
     let solver = L4Solver::new(morphology, channels, DT_MS, CLAMP_MIN, CLAMP_MAX).expect("solver");
