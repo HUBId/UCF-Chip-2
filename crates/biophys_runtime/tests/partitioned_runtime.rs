@@ -4,7 +4,7 @@ use biophys_core::{
     LifParams, LifState, ModChannel, NeuronId, Partition, PartitionPlan, StpParams, StpState,
     SynapseEdge,
 };
-use biophys_runtime::{BiophysRuntime, PartitionedRuntime};
+use biophys_runtime::{BiophysRuntime, PartitionedRuntime, SynapseConfig};
 
 fn lif_params() -> LifParams {
     LifParams {
@@ -117,9 +117,11 @@ fn partitioned_matches_single_runtime() {
         1,
         10,
         build_plan(),
-        edges,
-        stp_params,
-        1000,
+        SynapseConfig {
+            edges,
+            stp_params,
+            max_events_per_step: 1000,
+        },
     );
 
     let mut inputs = vec![0; 6];
@@ -143,9 +145,11 @@ fn partitioned_is_deterministic() {
         1,
         10,
         build_plan(),
-        edges.clone(),
-        stp_params.clone(),
-        1000,
+        SynapseConfig {
+            edges: edges.clone(),
+            stp_params: stp_params.clone(),
+            max_events_per_step: 1000,
+        },
     );
     let mut runtime_b = PartitionedRuntime::new_with_synapses(
         params,
@@ -153,9 +157,11 @@ fn partitioned_is_deterministic() {
         1,
         10,
         build_plan(),
-        edges,
-        stp_params,
-        1000,
+        SynapseConfig {
+            edges,
+            stp_params,
+            max_events_per_step: 1000,
+        },
     );
 
     let mut inputs = vec![0; 6];
@@ -193,9 +199,11 @@ fn parallel_partitioned_matches_serial_partitioned() {
         1,
         10,
         build_plan(),
-        edges.clone(),
-        stp_params.clone(),
-        1000,
+        SynapseConfig {
+            edges: edges.clone(),
+            stp_params: stp_params.clone(),
+            max_events_per_step: 1000,
+        },
     );
     let mut parallel = PartitionedRuntime::new_with_synapses(
         params,
@@ -203,9 +211,11 @@ fn parallel_partitioned_matches_serial_partitioned() {
         1,
         10,
         build_plan(),
-        edges,
-        stp_params,
-        1000,
+        SynapseConfig {
+            edges,
+            stp_params,
+            max_events_per_step: 1000,
+        },
     );
 
     let mut inputs = vec![0; 6];
