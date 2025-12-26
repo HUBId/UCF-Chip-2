@@ -1611,12 +1611,10 @@ fn pool_map_from_labels(morph: &MorphologySet) -> Result<PoolMap, AssetBuildErro
                         message: format!("multiple pool labels for neuron {}", neuron.neuron_id),
                     });
                 }
-            } else if label.k == LABEL_KEY_ROLE {
-                if role_label.replace(label.v.as_str()).is_some() {
-                    return Err(AssetBuildError::InvalidAssetData {
-                        message: format!("multiple role labels for neuron {}", neuron.neuron_id),
-                    });
-                }
+            } else if label.k == LABEL_KEY_ROLE && role_label.replace(label.v.as_str()).is_some() {
+                return Err(AssetBuildError::InvalidAssetData {
+                    message: format!("multiple role labels for neuron {}", neuron.neuron_id),
+                });
             }
         }
         let pool = pool_label.ok_or_else(|| AssetBuildError::InvalidAssetData {
