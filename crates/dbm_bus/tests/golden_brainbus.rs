@@ -137,128 +137,7 @@ fn golden_sequence_is_deterministic() {
 
     assert_eq!(snapshots_a, snapshots_b);
 
-    let expected = if cfg!(feature = "microcircuit-serotonin-attractor")
-        || cfg!(feature = "microcircuit-insula-fusion")
-    {
-        vec![
-            GoldenSnapshot {
-                profile: ProfileState::M0,
-                overlays: OverlaySet {
-                    simulate_first: false,
-                    export_lock: false,
-                    novelty_lock: false,
-                },
-                dwm: dbm_core::DwmMode::ExecPlan,
-                target: OrientTarget::Approval,
-                reason_codes: vec![
-                    "RC.GV.DWM.EXEC_PLAN".to_string(),
-                    "RC.GV.FOCUS_SHIFT.EXECUTED".to_string(),
-                    "RC.GV.ORIENT.TARGET_APPROVAL".to_string(),
-                    "integrity_ok".to_string(),
-                ],
-            },
-            GoldenSnapshot {
-                profile: ProfileState::M0,
-                overlays: OverlaySet {
-                    simulate_first: true,
-                    export_lock: false,
-                    novelty_lock: true,
-                },
-                dwm: dbm_core::DwmMode::ExecPlan,
-                target: OrientTarget::Approval,
-                reason_codes: vec![
-                    "RC.GV.DWM.EXEC_PLAN".to_string(),
-                    "RC.GV.FOCUS_SHIFT.BLOCKED_BY_LOCK".to_string(),
-                    "RC.GV.ORIENT.TARGET_APPROVAL".to_string(),
-                    "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
-                    "baseline_reward_block".to_string(),
-                    "hpa_deny_storm".to_string(),
-                    "integrity_ok".to_string(),
-                    "lc_med_trigger".to_string(),
-                ],
-            },
-            GoldenSnapshot {
-                profile: ProfileState::M0,
-                overlays: OverlaySet {
-                    simulate_first: true,
-                    export_lock: false,
-                    novelty_lock: true,
-                },
-                dwm: dbm_core::DwmMode::ExecPlan,
-                target: OrientTarget::Approval,
-                reason_codes: vec![
-                    "RC.GV.DWM.SIMULATE".to_string(),
-                    "RC.GV.FOCUS_SHIFT.BLOCKED_BY_LOCK".to_string(),
-                    "RC.GV.ORIENT.TARGET_APPROVAL".to_string(),
-                    "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
-                    "RC.RG.STATE.AROUSAL_UP".to_string(),
-                    "RC.RG.STATE.STABILITY_UP".to_string(),
-                    "baseline_reward_block".to_string(),
-                    "hpa_receipt_invalid".to_string(),
-                ],
-            },
-            GoldenSnapshot {
-                profile: ProfileState::M3,
-                overlays: OverlaySet {
-                    simulate_first: true,
-                    export_lock: true,
-                    novelty_lock: true,
-                },
-                dwm: dbm_core::DwmMode::Stabilize,
-                target: OrientTarget::Dlp,
-                reason_codes: vec![
-                    "RC.GV.DWM.STABILIZE".to_string(),
-                    "RC.GV.FOCUS_SHIFT.EXECUTED".to_string(),
-                    "RC.GV.HOLD.ON".to_string(),
-                    "RC.GV.ORIENT.TARGET_DLP".to_string(),
-                    "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
-                    "RC.GV.SEQUENCE.SLOW".to_string(),
-                    "RC.RG.STATE.AROUSAL_UP".to_string(),
-                    "RC.RG.STATE.STABILITY_UP".to_string(),
-                ],
-            },
-            GoldenSnapshot {
-                profile: ProfileState::M3,
-                overlays: OverlaySet {
-                    simulate_first: true,
-                    export_lock: true,
-                    novelty_lock: true,
-                },
-                dwm: dbm_core::DwmMode::Stabilize,
-                target: OrientTarget::Dlp,
-                reason_codes: vec![
-                    "RC.GV.DWM.STABILIZE".to_string(),
-                    "RC.GV.FOCUS_SHIFT.BLOCKED_BY_LOCK".to_string(),
-                    "RC.GV.HOLD.ON".to_string(),
-                    "RC.GV.ORIENT.TARGET_DLP".to_string(),
-                    "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
-                    "RC.GV.SEQUENCE.SLOW".to_string(),
-                    "RC.RE.INTEGRITY.FAIL".to_string(),
-                    "RC.RG.STATE.AROUSAL_UP".to_string(),
-                ],
-            },
-            GoldenSnapshot {
-                profile: ProfileState::M3,
-                overlays: OverlaySet {
-                    simulate_first: true,
-                    export_lock: true,
-                    novelty_lock: true,
-                },
-                dwm: dbm_core::DwmMode::Stabilize,
-                target: OrientTarget::Dlp,
-                reason_codes: vec![
-                    "RC.GV.DWM.STABILIZE".to_string(),
-                    "RC.GV.FOCUS_SHIFT.BLOCKED_BY_LOCK".to_string(),
-                    "RC.GV.HOLD.ON".to_string(),
-                    "RC.GV.ORIENT.TARGET_APPROVAL".to_string(),
-                    "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
-                    "RC.GV.SEQUENCE.SLOW".to_string(),
-                    "RC.RG.STATE.AROUSAL_UP".to_string(),
-                    "RC.RG.STATE.STABILITY_UP".to_string(),
-                ],
-            },
-        ]
-    } else if cfg!(feature = "biophys-stn") {
+    let expected = if cfg!(feature = "biophys-stn") {
         vec![
             GoldenSnapshot {
                 profile: ProfileState::M0,
@@ -393,6 +272,7 @@ fn golden_sequence_is_deterministic() {
                     "RC.GV.DWM.EXEC_PLAN".to_string(),
                     "RC.GV.FOCUS_SHIFT.EXECUTED".to_string(),
                     "RC.GV.ORIENT.TARGET_APPROVAL".to_string(),
+                    "baseline".to_string(),
                     "integrity_ok".to_string(),
                 ],
             },
@@ -410,30 +290,30 @@ fn golden_sequence_is_deterministic() {
                     "RC.GV.FOCUS_SHIFT.BLOCKED_BY_LOCK".to_string(),
                     "RC.GV.ORIENT.TARGET_APPROVAL".to_string(),
                     "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
-                    "baseline_reward_block".to_string(),
-                    "hpa_deny_storm".to_string(),
-                    "integrity_ok".to_string(),
-                    "lc_med_trigger".to_string(),
+                    "baseline".to_string(),
+                    "baseline_approval_strict".to_string(),
+                    "baseline_chain_conservatism".to_string(),
+                    "baseline_novelty_dampening".to_string(),
                 ],
             },
             GoldenSnapshot {
-                profile: ProfileState::M0,
+                profile: ProfileState::M2,
                 overlays: OverlaySet {
                     simulate_first: true,
-                    export_lock: false,
+                    export_lock: true,
                     novelty_lock: true,
                 },
                 dwm: dbm_core::DwmMode::ExecPlan,
                 target: OrientTarget::Approval,
                 reason_codes: vec![
-                    "RC.GV.DWM.SIMULATE".to_string(),
+                    "RC.GV.DWM.STABILIZE".to_string(),
                     "RC.GV.FOCUS_SHIFT.BLOCKED_BY_LOCK".to_string(),
+                    "RC.GV.HOLD.ON".to_string(),
                     "RC.GV.ORIENT.TARGET_APPROVAL".to_string(),
                     "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
+                    "RC.GV.SEQUENCE.SLOW".to_string(),
                     "RC.RG.STATE.AROUSAL_UP".to_string(),
                     "RC.RG.STATE.STABILITY_UP".to_string(),
-                    "baseline_reward_block".to_string(),
-                    "hpa_receipt_invalid".to_string(),
                 ],
             },
             GoldenSnapshot {
@@ -469,15 +349,15 @@ fn golden_sequence_is_deterministic() {
                     "RC.GV.DWM.STABILIZE".to_string(),
                     "RC.GV.FOCUS_SHIFT.BLOCKED_BY_LOCK".to_string(),
                     "RC.GV.HOLD.ON".to_string(),
-                    "RC.GV.ORIENT.TARGET_DLP".to_string(),
+                    "RC.GV.ORIENT.TARGET_APPROVAL".to_string(),
                     "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
                     "RC.GV.SEQUENCE.SLOW".to_string(),
-                    "RC.RE.INTEGRITY.FAIL".to_string(),
                     "RC.RG.STATE.AROUSAL_UP".to_string(),
+                    "RC.RG.STATE.STABILITY_UP".to_string(),
                 ],
             },
             GoldenSnapshot {
-                profile: ProfileState::M3,
+                profile: ProfileState::M0,
                 overlays: OverlaySet {
                     simulate_first: true,
                     export_lock: true,
@@ -488,12 +368,12 @@ fn golden_sequence_is_deterministic() {
                 reason_codes: vec![
                     "RC.GV.DWM.STABILIZE".to_string(),
                     "RC.GV.FOCUS_SHIFT.BLOCKED_BY_LOCK".to_string(),
-                    "RC.GV.HOLD.ON".to_string(),
                     "RC.GV.ORIENT.TARGET_APPROVAL".to_string(),
                     "RC.GV.PROGRESS.REWARD_BLOCKED".to_string(),
-                    "RC.GV.SEQUENCE.SLOW".to_string(),
                     "RC.RG.STATE.AROUSAL_UP".to_string(),
                     "RC.RG.STATE.STABILITY_UP".to_string(),
+                    "baseline".to_string(),
+                    "baseline_approval_strict".to_string(),
                 ],
             },
         ]
