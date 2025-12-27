@@ -46,7 +46,12 @@ fn build_single_compartment_neuron(neuron_id: u32) -> L4Neuron {
         e_rev: -65.0,
     };
 
-    let channels = vec![CompartmentChannels { leak, nak: None }];
+    let channels = vec![CompartmentChannels {
+        leak,
+        nak: None,
+        #[cfg(feature = "biophys-l4-ca")]
+        ca: None,
+    }];
 
     let solver =
         L4Solver::new(morphology, channels, DT_MS, -120.0, 60.0).expect("solver should init");

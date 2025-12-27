@@ -14,6 +14,11 @@ biophys = [
     "biophys_morphology/biophys",
 ]
 biophys-l4 = ["biophys"]
+biophys-l4-ca = [
+    "biophys-l4",
+    "biophys_channels/biophys-l4-ca",
+    "biophys_compartmental_solver/biophys-l4-ca",
+]
 biophys-l4-lc = ["biophys-l4"]
 
 [dependencies]

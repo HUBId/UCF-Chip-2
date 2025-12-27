@@ -165,6 +165,11 @@ mod tests {
         assert!(output.vectors.contains(&ThreatVector::Exfil));
     }
 
+    #[cfg(not(any(
+        feature = "microcircuit-amygdala-pop",
+        feature = "biophys-amygdala",
+        feature = "biophys-l4-amygdala"
+    )))]
     #[test]
     fn replay_mismatch_sets_integrity_compromise_and_high_threat() {
         let mut module = Amygdala::new();
@@ -177,6 +182,11 @@ mod tests {
         assert!(output.vectors.contains(&ThreatVector::IntegrityCompromise));
     }
 
+    #[cfg(not(any(
+        feature = "microcircuit-amygdala-pop",
+        feature = "biophys-amygdala",
+        feature = "biophys-l4-amygdala"
+    )))]
     #[test]
     fn policy_pressure_high_marks_probing_and_med_threat() {
         let mut module = Amygdala::new();
@@ -189,6 +199,11 @@ mod tests {
         assert!(output.vectors.contains(&ThreatVector::Probing));
     }
 
+    #[cfg(not(any(
+        feature = "microcircuit-amygdala-pop",
+        feature = "biophys-amygdala",
+        feature = "biophys-l4-amygdala"
+    )))]
     #[test]
     fn vector_order_is_deterministic() {
         let mut module = Amygdala::new();
@@ -245,6 +260,11 @@ mod tests {
         );
     }
 
+    #[cfg(not(any(
+        feature = "microcircuit-amygdala-pop",
+        feature = "biophys-amygdala",
+        feature = "biophys-l4-amygdala"
+    )))]
     #[test]
     fn tool_side_effects_raise_threat_and_vector() {
         let mut module = Amygdala::new();

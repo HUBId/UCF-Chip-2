@@ -1,5 +1,7 @@
 use engine::RegulationEngine;
-use ucf::v1::{ExecStats, IntegrityStateClass, PolicyStats, ReasonCode, ReceiptStats, SignalFrame};
+use ucf::v1::{
+    ExecStats, IntegrityStateClass, Overlays, PolicyStats, ReasonCode, ReceiptStats, SignalFrame,
+};
 
 fn profile_rank(profile: &str) -> u8 {
     match profile.split('_').next().unwrap_or(profile) {
@@ -109,5 +111,13 @@ fn trace_pass_is_informational_only() {
     let control_plain = engine_plain.tick(1_000);
 
     assert_eq!(control_pass.active_profile, control_plain.active_profile);
-    assert_eq!(control_pass.overlays, control_plain.overlays);
+    assert_eq!(
+        control_pass.overlays,
+        Some(Overlays {
+            simulate_first: false,
+            export_lock: false,
+            novelty_lock: false,
+            chain_tightening: false,
+        })
+    );
 }

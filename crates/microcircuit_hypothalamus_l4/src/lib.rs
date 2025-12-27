@@ -701,12 +701,13 @@ impl HypothalamusL4Microcircuit {
             neuron.last_soma_v = v;
         }
 
+        let delay_steps: Vec<u16> = self.synapses.iter().map(|syn| syn.delay_steps).collect();
         for spike_idx in &spikes {
             let indices = &self.pre_index[*spike_idx];
             self.queue.schedule_spike(
                 self.state.step_count,
                 indices,
-                |idx| self.synapses[idx].delay_steps,
+                |idx| delay_steps[idx],
                 |idx| {
                     #[cfg(feature = "biophys-l4-stp")]
                     {
@@ -1170,9 +1171,21 @@ fn build_neuron(neuron_id: u32) -> L4Neuron {
         CompartmentChannels {
             leak,
             nak: Some(nak),
+            #[cfg(feature = "biophys-l4-ca")]
+            ca: None,
         },
-        CompartmentChannels { leak, nak: None },
-        CompartmentChannels { leak, nak: None },
+        CompartmentChannels {
+            leak,
+            nak: None,
+            #[cfg(feature = "biophys-l4-ca")]
+            ca: None,
+        },
+        CompartmentChannels {
+            leak,
+            nak: None,
+            #[cfg(feature = "biophys-l4-ca")]
+            ca: None,
+        },
     ];
 
     let solver = L4Solver::new(morphology, channels, DT_MS, CLAMP_MIN, CLAMP_MAX).expect("solver");
@@ -1491,7 +1504,12 @@ impl CircuitBuilderFromAssets for HypothalamusL4Microcircuit {
                             e_k: -77.0,
                         })
                     };
-                    Ok(CompartmentChannels { leak, nak })
+                    Ok(CompartmentChannels {
+                        leak,
+                        nak,
+                        #[cfg(feature = "biophys-l4-ca")]
+                        ca: None,
+                    })
                 })
                 .collect::<Result<Vec<_>, AssetBuildError>>()?;
 

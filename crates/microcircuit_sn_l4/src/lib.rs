@@ -693,12 +693,13 @@ impl SnL4Microcircuit {
             neuron.last_soma_v = v;
         }
 
+        let delay_steps: Vec<u16> = self.synapses.iter().map(|syn| syn.delay_steps).collect();
         for spike_idx in &spikes {
             let indices = &self.pre_index[*spike_idx];
             self.queue.schedule_spike(
                 self.state.step_count,
                 indices,
-                |idx| self.synapses[idx].delay_steps,
+                |idx| delay_steps[idx],
                 |idx| {
                     #[cfg(feature = "biophys-l4-stp")]
                     {

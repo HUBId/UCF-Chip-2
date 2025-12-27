@@ -15,6 +15,11 @@ biophys-l4-nmda = [
     "biophys_compartmental_solver/biophys-l4-nmda",
     "biophys_synapses_l4/biophys-l4-nmda",
 ]
+biophys-l4-ca = [
+    "biophys-l4",
+    "biophys_channels/biophys-l4-ca",
+    "biophys_compartmental_solver/biophys-l4-ca",
+]
 biophys-l4-stp = ["biophys-l4-synapses"]
 biophys-l4-modulation = ["biophys-l4-synapses"]
 biophys-l4-plasticity = ["biophys-l4-synapses", "biophys_synapses_l4/biophys-l4-plasticity"]

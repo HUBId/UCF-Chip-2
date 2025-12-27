@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  build:
+  default:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -21,3 +21,44 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: Cargo test
         run: cargo test --workspace --all-targets
+
+  microcircuit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cargo test (microcircuit)
+        run: cargo test --features microcircuit-sn-attractor,microcircuit-lc-spike,microcircuit-serotonin-attractor,microcircuit-dopamin-attractor,microcircuit-amygdala-pop,microcircuit-pag-attractor,microcircuit-stn-hold,microcircuit-pmrf-rhythm,microcircuit-sc-attractor,microcircuit-cerebellum-pop,microcircuit-insula-fusion,microcircuit-hypothalamus-setpoint
+
+  biophys-l4-full:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cargo test (biophys-l4-full)
+        run: cargo test --features biophys,biophys-l4,biophys-l4-synapses,biophys-l4-nmda,biophys-l4-stp,biophys-l4-modulation,biophys-l4-homeostasis,biophys-l4-plasticity,biophys-l4-targeting,biophys-l4-morphology-multi,biophys-l4-ca,biophys-l4-ca-feedback,biophys-l4-sn,biophys-l4-hypothalamus,biophys-l4-insula,biophys-l4-amygdala,biophys-l4-pag
+
+  biophys-l4-full-parallel:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cargo test (biophys-l4-full-parallel)
+        run: cargo test --features biophys,biophys-l4,biophys-l4-synapses,biophys-l4-nmda,biophys-l4-stp,biophys-l4-modulation,biophys-l4-homeostasis,biophys-l4-plasticity,biophys-l4-targeting,biophys-l4-morphology-multi,biophys-l4-ca,biophys-l4-ca-feedback,biophys-l4-sn,biophys-l4-hypothalamus,biophys-l4-insula,biophys-l4-amygdala,biophys-l4-pag,biophys-parallel
+
+  trace-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cargo test (trace regression)
+        run: cargo test --features biophys-trace,biophys,biophys-l4,biophys-l4-sn

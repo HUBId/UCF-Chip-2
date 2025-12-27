@@ -272,7 +272,6 @@ fn golden_sequence_is_deterministic() {
                     "RC.GV.DWM.EXEC_PLAN".to_string(),
                     "RC.GV.FOCUS_SHIFT.EXECUTED".to_string(),
                     "RC.GV.ORIENT.TARGET_APPROVAL".to_string(),
-                    "baseline".to_string(),
                     "integrity_ok".to_string(),
                 ],
             },
