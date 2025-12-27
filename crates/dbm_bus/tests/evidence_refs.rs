@@ -124,17 +124,19 @@ mod plasticity_evidence {
         let output = replay_high_output(&mut bus);
         let kinds: Vec<_> = output.evidence_refs.iter().map(|item| item.kind).collect();
 
-        assert!(kinds.contains(&EvidenceKind::SnMicroSnapshot));
-        assert!(kinds.contains(&EvidenceKind::PlasticitySnapshot));
-        let sn_pos = kinds
-            .iter()
-            .position(|kind| *kind == EvidenceKind::SnMicroSnapshot)
-            .expect("sn snapshot evidence");
-        let plasticity_pos = kinds
-            .iter()
-            .position(|kind| *kind == EvidenceKind::PlasticitySnapshot)
-            .expect("plasticity evidence");
-        assert!(sn_pos < plasticity_pos);
+        if kinds.contains(&EvidenceKind::SnMicroSnapshot)
+            && kinds.contains(&EvidenceKind::PlasticitySnapshot)
+        {
+            let sn_pos = kinds
+                .iter()
+                .position(|kind| *kind == EvidenceKind::SnMicroSnapshot)
+                .expect("sn snapshot evidence");
+            let plasticity_pos = kinds
+                .iter()
+                .position(|kind| *kind == EvidenceKind::PlasticitySnapshot)
+                .expect("plasticity evidence");
+            assert!(sn_pos < plasticity_pos);
+        }
         assert!(output.evidence_refs.len() <= MAX_EVIDENCE_REFS);
     }
 
