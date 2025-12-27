@@ -149,10 +149,7 @@ mod tests {
             .contains(&"RC.GV.HOLD.ON".to_string()));
     }
 
-    #[cfg(all(
-        not(feature = "biophys-stn"),
-        not(feature = "microcircuit-stn-hold")
-    ))]
+    #[cfg(all(not(feature = "biophys-stn"), not(feature = "microcircuit-stn-hold")))]
     #[test]
     fn policy_pressure_high_triggers_hold_and_novelty_lock() {
         let mut stn = Stn::new();
@@ -166,10 +163,7 @@ mod tests {
         assert!(output.hint_simulate_first);
     }
 
-    #[cfg(all(
-        not(feature = "biophys-stn"),
-        not(feature = "microcircuit-stn-hold")
-    ))]
+    #[cfg(all(not(feature = "biophys-stn"), not(feature = "microcircuit-stn-hold")))]
     #[test]
     fn arousal_and_threat_trigger_hold_without_receipt_invalid() {
         let mut stn = Stn::new();
@@ -182,10 +176,7 @@ mod tests {
         assert!(output.hold_active);
     }
 
-    #[cfg(all(
-        not(feature = "biophys-stn"),
-        not(feature = "microcircuit-stn-hold")
-    ))]
+    #[cfg(all(not(feature = "biophys-stn"), not(feature = "microcircuit-stn-hold")))]
     #[test]
     fn tool_side_effects_hold_with_policy_pressure() {
         let mut stn = Stn::new();
